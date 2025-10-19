@@ -15,51 +15,44 @@ Reaktionsphase: Das System spielt die passenden Sounds ab.
 📁 Projektstruktur
 (copy paste in einem text editor dann siehts besser aus)
 
+```mermaid
+graph TD
 
-│
-├── main.py
-│
-├── setup/
-│   ├── __init__.py
-│   ├── setup_wizard.py
-│   ├── face_setup.py
-│   ├── sound_setup.py
-│   ├── setup_config.json
-│   └── profiles/
-│       └── default_face_baseline.json
-│
-├── detection/
-│   ├── __init__.py
-│   ├── camera_stream.py
-│   ├── gesture_recognition.py
-│   ├── face_analyzer.py
-│   ├── emotion_recognition.py
-│   └── detectors/
-│       └── thumbs_up.py
-│
-├── sounds/
-│   ├── __init__.py
-│   ├── play_sound.py
-│   ├── sound_cache/
-│   └── sound_map.json
-│
-├── utils/
-│   ├── __init__.py
-│   ├── json_manager.py
-│   ├── logger.py
-│   └── settings.py
-│
-├── ai/
-│   ├── __init__.py
-│   └── model_loader.py ---> todo später um modell insgesamt nur einmalig zuladen
-│
-├── assets/
-│   ├── icons/
-│   ├── sounds/
-│   └── themes/
-│
-├── requirements.txt
-└── README.md
+A[main.py] --> B[setup/]
+A --> C[detection/]
+A --> D[sounds/]
+A --> E[utils/]
+A --> F[ai/]
+A --> G[assets/]
+
+B --> B1[setup_wizard.py]
+B --> B2[face_setup.py]
+B --> B3[sound_setup.py]
+B --> B4[setup_config.json]
+B --> B5[profiles/]
+B5 --> B6[default_face_baseline.json]
+
+C --> C1[camera_stream.py]
+C --> C2[gesture_recognition.py]
+C --> C3[face_analyzer.py]
+C --> C4[emotion_recognition.py]
+C --> C5[detectors/]
+C5 --> C6[thumbs_up.py]
+
+D --> D1[play_sound.py]
+D --> D2[sound_cache/]
+D --> D3[sound_map.json]
+
+E --> E1[json_manager.py]
+E --> E2[logger.py]
+E --> E3[settings.py]
+
+F --> F1[model_loader.py]
+
+G --> G1[icons/]
+G --> G2[sounds/]
+G --> G3[themes/]
+```
 
 
 ⚙️ Erklärung der Module
