@@ -13,8 +13,9 @@ Live-Erkennungsphase: Kamera erkennt Emotionen & Gesten in Echtzeit.
 Reaktionsphase: Das System spielt die passenden Sounds ab.
 
 📁 Projektstruktur
+(copy paste in einem text editor dann siehts besser aus)
 
-emotion_sound_ai/
+
 │
 ├── main.py
 │
@@ -50,7 +51,7 @@ emotion_sound_ai/
 │
 ├── ai/
 │   ├── __init__.py
-│   └── model_loader.py
+│   └── model_loader.py ---> todo später um modell insgesamt nur einmalig zuladen
 │
 ├── assets/
 │   ├── icons/
