@@ -1,4 +1,5 @@
 🧠 Moody – Emotion- & Gesten-Erkennung mit Soundreaktion
+
 📖 Projektbeschreibung
 
 Moody ist ein KI-gestütztes System, das mithilfe einer Webcam das Gesicht und Gesten einer Person analysiert.
@@ -11,6 +12,8 @@ Setup-Phase: Nutzer kalibriert seine Gesichtsemotionen und wählt passende Sound
 Live-Erkennungsphase: Kamera erkennt Emotionen & Gesten in Echtzeit.
 
 Reaktionsphase: Das System spielt die passenden Sounds ab.
+
+
 
 📁 Projektstruktur
 (copy paste in einem text editor dann siehts besser aus)
@@ -56,6 +59,8 @@ G --> G3[themes/]
 
 
 ⚙️ Erklärung der Module
+
+
 🧭 main.py
 
 Einstiegspunkt des Projekts.
