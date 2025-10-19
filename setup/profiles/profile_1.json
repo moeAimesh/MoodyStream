@@ -1,0 +1,18 @@
+{
+  "user": "NUR EIN BEISPIEL",
+  "faces": {
+    "baseline": {
+      "happy": 0.92,
+      "neutral": 0.85
+    }
+  },
+  "sounds": {
+    "ok": "sounds/sound_cache/ok.mp3",
+    "laugh": "sounds/sound_cache/laugh.mp3",
+    "angry": "sounds/sound_cache/angry.mp3"
+  },
+  "settings": {
+    "volume": 0.8,
+    "use_gui_feedback": true
+  }
+}
