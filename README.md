@@ -63,6 +63,7 @@ G --> G3[themes/]
 
 🧭 main.py
 
+
 Einstiegspunkt des Projekts.
 
 Führt den gesamten Ablauf aus:
@@ -74,6 +75,8 @@ Startet danach die Live-Erkennung mit Kamera.
 Erkennt, ob ein Profil bereits existiert, um Setup ggf. zu überspringen.
 
 🧩 Setup-Phase (setup/-Ordner)
+
+
 🔹 setup/setup_wizard.py
 
 Steuert den gesamten Einrichtungsablauf.
@@ -136,6 +139,8 @@ Format: <username>_face_baseline.json
 
 
 🎥 Detection-Phase (detection/-Ordner)
+
+
 🔹 camera_stream.py
 
 Öffnet die Webcam und läuft in einer Endlosschleife.
@@ -157,6 +162,7 @@ Erkennt definierte Gesten über detectors/thumbs_up.py.
 
 Gibt z. B. "thumbsup" oder None zurück.
 bei weiteren Gesten Weitere dateien hinzufügen (z. B. Peace.py, Wave.py, Fist.py) die ähnluch funkitonieren sollen wie thumbsup.py
+
 
 🔹 detectors/thumbs_up.py
 
@@ -184,6 +190,8 @@ Wählt anhand der Priorität(muss definiert werden) welcher Sound gespielt wird.
 
 
 🔊 Sound-System (sounds/-Ordner)
+
+
 🔹 play_sound.py
 
 Nutzt pygame.mixer zum Abspielen von Sounds.
@@ -211,6 +219,8 @@ Beispiel:
 
 
 🧰 Hilfsmodule (utils/-Ordner)
+
+
 🔹 json_manager.py
 
 Einfaches Laden und Speichern von JSON-Dateien.
