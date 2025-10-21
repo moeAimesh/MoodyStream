@@ -1,121 +1,128 @@
 import cv2
 from deepface import DeepFace
+from sklearn.neighbors import NearestNeighbors
+import numpy as np
 import json
 import time
-import numpy as np
 import os
-from utils.json_manager import save_json, load_json
 
 
-# -----------------------------------------------------------
-# 🔹 Einzelne Kalibrierung
-# -----------------------------------------------------------
-def single_calibration(duration=5, text="Kalibriere...", analyze_every=5):
-    """Eine einzelne Kalibrierung"""
-    cam = cv2.VideoCapture(0)
-    cam.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-    cam.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+class RestFaceCalibrator:
+    """
+    Kalibriert das Rest-Face des Nutzers.
+    Speichert DeepFace-Emotionsvektoren und trainiert daraus ein Nearest-Neighbour-Modell.
+    """
 
-    emotion_sums = {}
-    frame_count = 0
-    analyze_count = 0
-    start = time.time()
+    def __init__(self, model_path="setup/rest_face_model.json"):
+        self.model_path = model_path
+        self.vectors = []
+        self.model = None
 
-    while time.time() - start < duration:
-        ret, frame = cam.read()
-        if not ret:
-            continue
+    def record_rest_face(self, duration=20, analyze_every=5):
+        """
+        Nimmt mehrere Frames auf und extrahiert die Emotion-Vektoren des Rest-Face.
+        """
+        cam = cv2.VideoCapture(0)
+        cam.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        cam.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
-        # Overlay anzeigen
-        cv2.putText(frame, text, (50, 50),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
-        cv2.imshow("calibration", frame)
+        frame_count = 0
+        start = time.time()
 
-        # ESC = Abbrechen
-        if cv2.waitKey(1) & 0xFF == 27:
-            break
+        print("📷 Bitte mit neutralem Gesicht in die Kamera schauen...")
 
-        # Nur jedes n-te Frame analysieren
-        if frame_count % analyze_every == 0:
-            try:
-                result = DeepFace.analyze(frame, actions=['emotion'], enforce_detection=False)
-                emotions = result[0]['emotion']
-                for k, v in emotions.items():
-                    emotion_sums[k] = emotion_sums.get(k, 0) + v
-                analyze_count += 1
-            except Exception as e:
-                print("⚠️ Error while analyzing:", e)
+        while time.time() - start < duration:
+            ret, frame = cam.read()
+            if not ret:
+                continue
 
-        frame_count += 1
+            cv2.putText(frame, "Calibrating Rest Face...", (40, 50),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
+            cv2.imshow("Rest Face Calibration", frame)
 
-    cam.release()
-    cv2.destroyAllWindows()
+            if cv2.waitKey(1) & 0xFF == 27:
+                print("❌ Abgebrochen")
+                break
 
-    if analyze_count == 0:
-        print("⚠️ no frames analyzed successfully. maybe no face detected?")
-        return None
+            if frame_count % analyze_every == 0:
+                try:
+                    result = DeepFace.analyze(frame, actions=["emotion"], enforce_detection=False)
+                    emotion_vec = np.array(list(result[0]["emotion"].values()))
+                    self.vectors.append(emotion_vec)
+                    print(f"🟢 Frame {len(self.vectors)} aufgenommen")
+                except Exception as e:
+                    print("⚠️ Analysefehler:", e)
 
-    # Durchschnitt berechnen
-    return {k: float(v / analyze_count) for k, v in emotion_sums.items()}
+            frame_count += 1
 
+        cam.release()
+        cv2.destroyAllWindows()
 
-# -----------------------------------------------------------
-# 🔹 Mehrfache Kalibrierung (verschiedene Blickwinkel)
-# -----------------------------------------------------------
-def multi_perspective_calibration(rounds=5, duration=4, user="default"):
-    print("📷 Please look at the camera with a REST FACE from different angles")
-    all_results = []
+        if len(self.vectors) == 0:
+            print("⚠️ Keine Emotionen erkannt.")
+            return False
 
-    for i in range(rounds):
-        input(f"\n➡️ Position {i+1}/{rounds}: Press ENTER when ready...")
-        result = single_calibration(duration, text=f"Calibrating ({i+1}/{rounds})...", analyze_every=5)
-        if result:
-            all_results.append(result)
-
-    if not all_results:
-        print("❌ no valid calibration data collected.")
-        return None
-
-    combined = {}
-    for emotion in all_results[0].keys():
-        combined[emotion] = float(np.mean([r[emotion] for r in all_results]))
-
-    # Ergebnis speichern
-    profile_dir = os.path.join("setup", "profiles")
-    os.makedirs(profile_dir, exist_ok=True)
-    path = os.path.join(profile_dir, f"{user}_face_baseline.json")
-
-    with open(path, "w") as f:
-        json.dump(combined, f, indent=2)
-
-    print(f"\n✅ done -> saved under {path}")
-    return combined
-
-
-# -----------------------------------------------------------
-# 🔹 Setup-Wrapper
-# -----------------------------------------------------------
-def run_face_setup(user="default"):
-    """Wird vom Setup-Wizard aufgerufen.
-       Führt Kalibrierung nur aus, wenn kein Eintrag vorhanden ist."""
-    
-    config_path = "setup/setup_config.json"
-
-    # Prüfen, ob Datei existiert und bereits Gesichtsdaten enthält
-    if os.path.exists(config_path):
-        try:
-            data = load_json(config_path)
-            if "faces" in data and isinstance(data["faces"], dict) and len(data["faces"]) > 0:
-                print("ℹ️ Face baseline already exists – skipping calibration.")
-                return True
-        except Exception as e:
-            print(f"⚠️ Warning: Could not read {config_path} ({e}), will redo calibration.")
-
-    # Wenn keine Daten vorhanden -> Kalibrierung starten
-    result = multi_perspective_calibration(rounds=5, duration=4, user=user)
-    if result:
-        save_json(config_path, "faces", result)
-        print("✅ Rest-face baseline saved to setup_config.json")
+        print(f"✅ {len(self.vectors)} Rest-Face-Vektoren gesammelt.")
         return True
 
-    return False
+    def train(self):
+        """
+        Trainiert ein Nearest-Neighbor-Modell auf den Rest-Face-Vektoren.
+        """
+        if len(self.vectors) < 5:
+            print("⚠️ Zu wenige Daten für Training!")
+            return False
+
+        X = np.array(self.vectors)
+        self.model = NearestNeighbors(n_neighbors=1, metric="euclidean")
+        self.model.fit(X)
+
+        print("🧠 Modell trainiert.")
+        return True
+
+    def save_model(self):
+        """
+        Speichert alle Vektoren (und Mittelwert) in JSON.
+        """
+        if not self.vectors:
+            print("⚠️ Keine Daten zum Speichern.")
+            return
+
+        model_data = {
+            "vectors": np.array(self.vectors).tolist(),
+            "mean_vector": np.mean(self.vectors, axis=0).tolist()
+        }
+
+        os.makedirs(os.path.dirname(self.model_path), exist_ok=True)
+        with open(self.model_path, "w") as f:
+            json.dump(model_data, f, indent=2)
+
+        print(f"💾 Modell gespeichert unter: {self.model_path}")
+
+    def visualize_space(self):
+        """
+        Optional: PCA-Projektion zur visuellen Kontrolle
+        """
+        try:
+            from sklearn.decomposition import PCA
+            import matplotlib.pyplot as plt
+            X = np.array(self.vectors)
+            pca = PCA(n_components=2)
+            reduced = pca.fit_transform(X)
+            plt.scatter(reduced[:, 0], reduced[:, 1], color='blue', label="Rest Face Frames")
+            plt.legend()
+            plt.title("Rest Face Emotion Space (2D PCA)")
+            plt.show()
+        except Exception as e:
+            print("⚠️ Visualisierung fehlgeschlagen:", e)
+
+
+# -------------------------------------------------------
+# 🔹 Hauptfunktion – kann direkt ausgeführt werden
+# -------------------------------------------------------
+if __name__ == "__main__":
+    calibrator = RestFaceCalibrator(model_path="setup/rest_face_model.json")
+    if calibrator.record_rest_face(duration=30, analyze_every=5):
+        if calibrator.train():
+            calibrator.save_model()
+            calibrator.visualize_space()

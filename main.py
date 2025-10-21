@@ -17,8 +17,6 @@ start_detection()
 
 Fehlerfälle betrachten: keine Kamera; fehlende Profile/Sounds → sauber melden und zum Setup zurückführen."""
 
-# Diese Umgebungsvariablen müssen VOR dem Import von TensorFlow gesetzt werden
-
 from detection.camera_stream import start_detection
 from setup.setup_wizard import main as run_setup_wizard
 

@@ -17,19 +17,57 @@ Wichtig: Wizard führt dich weiter, bis alles Notwendige vorhanden ist."""
 
 
 
-from setup.face_setup import run_face_setup
+"""
+Aufgabe: Geführter Einrichtungs-Ablauf in Schritten (GUI oder simple Popups):
+
+Profil wählen/neu anlegen,
+Gesichts-Baseline erfassen,
+Sounds je Verhalten/Emotion zuordnen,
+alles in Profil-JSON speichern.
+"""
+
+import os
 from setup.sound_setup import run_sound_setup
+from setup.face_setup import RestFaceCalibrator
+
+
+def run_rest_face_setup(user="default"):
+    """
+    Führt die neue Rest-Face-Kalibrierung aus.
+    """
+    print("📷 Starte Rest-Face-Kalibrierung ...")
+    model_path = f"setup/{user}_rest_face_model.json"
+
+    calibrator = RestFaceCalibrator(model_path=model_path)
+    success = calibrator.record_rest_face(duration=20, analyze_every=5)
+
+    if not success:
+        print("❌ Keine Daten erfasst – bitte erneut versuchen.")
+        return False
+
+    calibrator.train()
+    calibrator.save_model()
+    calibrator.visualize_space()
+    print("✅ Rest-Face-Modell erfolgreich erstellt.")
+    return True
+
 
 def main():
     print("🚀 Starting Moody Setup Wizard...")
 
-    if not run_face_setup(user="default"):
-        print("❌ Face setup aborted.")
+    # 🧠 Rest-Face-Kalibrierung (neuer Ansatz)
+    if not run_rest_face_setup(user="default"):
+        print("❌ Rest-Face-Setup abgebrochen.")
         return False
 
+    # 🔊 Sound-Zuordnung (alter Sound-Setup-Schritt)
     if not run_sound_setup(user="default"):
-        print("❌ Sound setup aborted.")
+        print("❌ Sound-Setup abgebrochen.")
         return False
 
-    print("✅ Setup completed.")
+    print("✅ Setup vollständig abgeschlossen.")
     return True
+
+
+if __name__ == "__main__":
+    main()
