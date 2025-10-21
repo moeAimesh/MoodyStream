@@ -15,7 +15,7 @@ Reaktionsphase: Das System spielt die passenden Sounds ab.
 
 
 
-📁 Projektstruktur
+📁 Projektstruktur (wird sich safe bisschen ändern)
 (copy paste in einem text editor dann siehts besser aus)
 
 ```mermaid
