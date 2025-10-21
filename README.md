@@ -16,7 +16,7 @@ Reaktionsphase: Das System spielt die passenden Sounds ab.
 
 
 📁 Projektstruktur (wird sich safe bisschen ändern)
-(copy paste in einem text editor dann siehts besser aus)
+
 
 ```mermaid
 graph TD
