@@ -54,6 +54,7 @@ def run_rest_face_setup(user="default"):
 
 def main():
     print("🚀 Starting Moody Setup Wizard...")
+    
 
     # 🧠 Rest-Face-Kalibrierung (neuer Ansatz)
     if not run_rest_face_setup(user="default"):
@@ -67,6 +68,7 @@ def main():
 
     print("✅ Setup vollständig abgeschlossen.")
     return True
+
 
 
 if __name__ == "__main__":

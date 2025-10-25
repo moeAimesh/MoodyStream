@@ -1,30 +1,29 @@
-"""Aufgabe: Aus Emotions-Scores eine diskrete Emotion ableiten (mit Schwellenwerten, Hysterese, Mehrframe-Mehrheit).
-
-Eingaben: Scores von face_analyzer.
-
-Ausgaben: z. B. "laugh", "angry" oder None.
-
-Ziel: Stabile Entscheidungen, nicht bei jedem Frame springen."""
-
 import os
 import json
+import time
 import numpy as np
 from deepface import DeepFace
-
+from collections import deque
+from statistics import mode
 
 class EmotionRecognition:
     """
-    Ermittelt die aktuelle Emotion aus dem Kamerabild
-    und erkennt automatisch, ob es sich nur um das Rest-Face handelt.
+    Erkennt stabile Emotionen mit Glättung + Rest-Face-Abgleich.
     """
 
-    def __init__(self, model_path="setup/rest_face_model.json", threshold=10.0):
+    def __init__(self, model_path="setup/rest_face_model.json",
+                 threshold=10.0, interval=0.3, history_size=7):
         """
-        Lädt das gespeicherte Rest-Face-Modell und legt den Schwellenwert fest.
-        threshold: Euklidische Distanz, ab der eine Emotion als „echt“ gilt.
+        threshold: Distanz-Schwelle für Rest-Face.
+        interval: Analyseintervall (Sekunden).
+        history_size: Wie viele letzte Emotionen gespeichert werden.
         """
         self.threshold = threshold
+        self.interval = interval
+        self.last_analysis = 0
+        self.recent_emotions = deque(maxlen=history_size)
         self.mean_vector = None
+        self.stable_emotion = None
 
         if os.path.exists(model_path):
             with open(model_path, "r") as f:
@@ -36,33 +35,35 @@ class EmotionRecognition:
 
     def analyze_frame(self, frame):
         """
-        Analysiert ein einzelnes Kamerabild mit DeepFace.
-        Gibt 'neutral' zurück, wenn Rest-Face erkannt wird,
-        sonst die dominante Emotion.
+        Analysiert ein einzelnes Frame (alle interval Sekunden).
+        Kombiniert DeepFace-Ergebnis mit Rest-Face-Abstand und Glättung.
         """
+        now = time.time()
+        if now - self.last_analysis < self.interval:
+            return self.stable_emotion  # zu früh, altes Ergebnis zurückgeben
+
+        self.last_analysis = now
+
         try:
             result = DeepFace.analyze(frame, actions=['emotion'], enforce_detection=False)
             emotion_scores = result[0]["emotion"]
             dominant = result[0]["dominant_emotion"]
-
             v_current = np.array(list(emotion_scores.values()))
 
-            # Wenn kein Rest-Face vorhanden, gib die Emotion direkt zurück
+            # Wenn kein Rest-Face existiert → direkt Emotion
             if self.mean_vector is None:
-                return dominant
-
-            # Distanz zum gespeicherten Rest-Face berechnen
-            distance = np.linalg.norm(v_current - self.mean_vector)
-
-            if distance < self.threshold:
-                # innerhalb der Neutralzone → kein Trigger
-                print(f"🧊 Rest-Face erkannt (Distanz={distance:.2f})")
-                return "neutral"
+                emotion = dominant
             else:
-                # klare Emotion erkannt
-                print(f"🔥 Emotion erkannt: {dominant} (Distanz={distance:.2f})")
-                return dominant
+                # Distanz zur neutralen Emotion berechnen
+                distance = np.linalg.norm(v_current - self.mean_vector)
+                emotion = "neutral" if distance < self.threshold else dominant
+
+            # Glättung: aktuelle Emotion in Verlauf einfügen
+            self.recent_emotions.append(emotion)
+            self.stable_emotion = mode(self.recent_emotions)
+
+            return self.stable_emotion
 
         except Exception as e:
             print(f"⚠️ Fehler bei Emotionserkennung: {e}")
-            return None
+            return self.stable_emotion

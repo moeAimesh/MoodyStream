@@ -74,7 +74,7 @@ class RestFaceCalibrator:
             return False
 
         X = np.array(self.vectors)
-        self.model = NearestNeighbors(n_neighbors=1, metric="euclidean")
+        self.model = NearestNeighbors(n_neighbors=1, metric="cosine")  # Cosine-Distanz macht mehr Sinn bei Emotionen als euklidische weil sie den Winkel zwischen Vektoren berücksichtigt
         self.model.fit(X)
 
         print("🧠 Modell trainiert.")
