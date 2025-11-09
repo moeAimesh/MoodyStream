@@ -1,4 +1,12 @@
-"""Aufgabe: Zentrale Pfade/Konstanten:
+"""Aufgabe: Zentrale Pfade und Konstanten für das gesamte Projekt.
+
+Nutzen: 
+- Alle Module greifen auf dieselben Speicherorte zu (kein Copy-Paste).
+- Änderungen an Verzeichnissen oder Dateinamen müssen nur hier angepasst werden.
+- Enthält zusätzlich erlaubte Keys (Emotionen/Gesten) und die Start-URL für myinstants.com.
+"""
+
+"""
 from pathlib import Path
 
 
@@ -19,4 +27,4 @@ ALLOWED_BEHAVIOUR_KEYS = [
 # Start-URL für myinstants (kannst du anpassen)
 MYINSTANTS_URL = "https://www.myinstants.com/en/index/de/"
 
-Nutzen: überall identische Pfade, kein Copy-Paste."""
+"""
