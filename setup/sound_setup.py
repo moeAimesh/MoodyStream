@@ -36,45 +36,61 @@ class API:
         return "SOUND DETECTED"
 
     def download_last(self):
-        """Lädt den zuletzt erkannten Sound herunter und fragt nach einer Kategorie."""
+        """Lädt den zuletzt erkannten Sound herunter (falls nötig) und fragt nach einer Kategorie.
+           Speichert Mapping in sounds/sound_map.json UND setup/setup_config.json (merge)."""
         if not self.last_url:
             print("⚠️ No sound selected yet.")
             return "NO SOUND SELECTED"
 
         url = self.last_url
-        filename = url.split("/")[-1]
-        path = os.path.join(CACHE_DIR, filename)
+        # robuste Dateinamenermittlung
+        name = url.split("?")[0].split("/")[-1] or "sound.mp3"
+        if not name.lower().endswith(".mp3"):
+            name += ".mp3"
+        path = os.path.join(CACHE_DIR, name)
 
-        # Prüfen, ob bereits vorhanden
-        if os.path.exists(path):
-            print(f"ℹ️ {filename} already downloaded.")
-            return "ALREADY DOWNLOADED"
+        # Falls Datei schon existiert, nicht abbrechen – weiter mappen
+        if not os.path.exists(path):
+            try:
+                r = requests.get(url, timeout=15)
+                r.raise_for_status()
+                with open(path, "wb") as f:
+                    f.write(r.content)
+                print(f"✅ {name} downloaded ({len(r.content)//1024} KB)")
+            except Exception as e:
+                print(" Error during download:", e)
+                return str(e)
+        else:
+            print(f"ℹ️ {name} already exists, will only map to a key.")
 
-        # Datei laden
-        try:
-            r = requests.get(url, timeout=10)
-            r.raise_for_status()
-            with open(path, "wb") as f:
-                f.write(r.content)
-            print(f"✅ {filename} downloaded ({len(r.content)//1024} KB)")
+        # --- Nutzer fragt, welchem Verhalten der Sound zugeordnet wird ---
+        placeholder = "happy"
+        allowed_str = ", ".join(ALLOWED_BEHAVIOUR_KEYS) if ALLOWED_BEHAVIOUR_KEYS else "any"
+        prompt = f"🎵 For which behavior/emotion is this sound?\nAllowed: {allowed_str}"
+        category = webview.windows[0].evaluate_js(f"prompt({json.dumps(prompt)}, {json.dumps(placeholder)})")
 
-            # --- Nutzer fragt, welchem Verhalten der Sound zugeordnet wird ---
-            category = webview.windows[0].evaluate_js("prompt('🎵 For which behavior/emotion is this sound? (e.g. ok, laugh, angry)')")
-            if not category:
-                print("⚠️ No category entered, skipping.")
-                return "SKIPPED"
+        if not category:
+            print("⚠️ No category entered, skipping.")
+            return "SKIPPED"
 
-            # Pfad speichern (relativ)
-            rel_path = os.path.join("sounds", "sound_cache", filename)
-            save_json(SOUND_MAP_PATH, category, rel_path)
-            save_json("setup/setup_config.json", "sounds", {category: rel_path})
+        category = str(category).strip().lower()
+        if ALLOWED_BEHAVIOUR_KEYS and category not in ALLOWED_BEHAVIOUR_KEYS:
+            msg = f"Invalid key: {category}"
+            print("x", msg)
+            return msg
 
-            print(f"💾 Sound '{filename}' saved under key '{category}'")
-            return "OK"
+        # Pfad relativ (forward slashes)
+        rel_path = "sounds/sound_cache/" + os.path.basename(path)
 
-        except Exception as e:
-            print("❌ Error during download:", e)
-            return str(e)
+        # 1) In sound_map.json -> einzelner Key
+        save_json(str(SOUND_MAP_PATH), category, rel_path)
+
+        # 2) In setup_config.json -> Mergen unter "sounds"
+        update_json(str(SETUP_CONFIG_PATH), "sounds", {category: rel_path})
+
+        print(f"💾 Sound '{name}' saved under key '{category}'")
+        return "OK"
+
 
 
 # --------------------------------------------------
