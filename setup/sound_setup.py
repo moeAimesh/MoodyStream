@@ -86,11 +86,11 @@ def run_sound_setup(user="default"):
 
     window = webview.create_window(
         title="🎧 Sound Selection (Integrated)",
-        url="https://www.myinstants.com/en/index/de/",
+        url=MYINSTANTS_URL,
         width=1200,
         height=800,
         js_api=api
-    )
+        )
 
     js_hook = r"""
         (function() {
