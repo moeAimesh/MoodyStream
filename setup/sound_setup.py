@@ -28,12 +28,21 @@ class API:
         self.last_url = None
 
     def set_sound(self, url):
-        """Wird vom JS aufgerufen, wenn ein Sound abgespielt wird."""
-        if url.startswith("/"):
-            url = "https://www.myinstants.com" + url
-        self.last_url = url
-        print(f"🎧 SOUND DETECTED (NOT DOWNLOADED): {url}")
-        return "SOUND DETECTED"
+        """Wird vom JS aufgerufen, sobald irgendwo eine MP3-URL erkannt wird."""
+        try:
+            # relative → absolute URL auflösen
+            if url.startswith("/"):
+                url = "https://www.myinstants.com" + url
+            # Safety: nur mp3 akzeptieren
+            if not url.lower().endswith(".mp3"):
+                print(f"⚠️ Ignored non-mp3 url: {url}")
+                return "IGNORED"
+            self.last_url = url
+            print(f"🎧 SOUND DETECTED (NOT DOWNLOADED): {url}")
+            return "SOUND DETECTED"
+        except Exception as e:
+            print("❌ set_sound error:", e)
+            return "ERROR"
 
     def download_last(self):
         """Lädt den zuletzt erkannten Sound herunter (falls nötig) und fragt nach einer Kategorie.
@@ -109,49 +118,97 @@ def run_sound_setup(user="default"):
         )
 
     js_hook = r"""
-(function(){
-  console.log('🚀 Debug Hook loaded');
+            (function(){
+            console.log('🚀 Network+DOM Hook loaded');
 
-  function attachHook(doc){
-    if(!doc) return;
-    console.log('📡 Hook attached to', doc.URL);
-    doc.addEventListener('click', function(ev){
-      try{
-        let link = ev.target.closest('a');
-        if(link && link.href && (link.href.includes('/media/sounds/') || link.href.endsWith('.mp3'))){
-          console.log('🎵 Detected link:', link.href);
-          if(window.pywebview?.api?.set_sound){
-            window.pywebview.api.set_sound(link.href);
-            // Sichtbare Meldung
-            const div=document.createElement('div');
-            div.textContent='🎧 erkannt: '+link.href.split('/').pop();
-            Object.assign(div.style,{
-              position:'fixed',bottom:'10px',left:'10px',background:'rgba(0,0,0,0.8)',
-              color:'#fff',padding:'6px 10px',borderRadius:'6px',zIndex:999999,
-              fontFamily:'monospace',fontSize:'12px'
+            // ---- Helpers ----
+            function absUrl(u){
+                try { return new URL(u, location.origin).toString(); }
+                catch(e){ return u; }
+            }
+            function report(u){
+                try{
+                if(!u) return;
+                const url = absUrl(u);
+                if(!/\.mp3(\?|$)/i.test(url)) return;
+                console.log('🎵 MP3 detected:', url);
+                if (window.pywebview && window.pywebview.api && window.pywebview.api.set_sound){
+                    window.pywebview.api.set_sound(url);
+                    toast('🎧 erkannt: '+url.split('/').pop());
+                }
+                }catch(e){ console.error(e); }
+            }
+            function toast(msg){
+                const div=document.createElement('div');
+                div.textContent=msg;
+                Object.assign(div.style,{
+                position:'fixed',bottom:'12px',left:'12px',background:'rgba(0,0,0,0.8)',
+                color:'#fff',padding:'6px 10px',borderRadius:'6px',zIndex:999999,
+                font:'12px/1.3 system-ui, sans-serif'
+                });
+                document.body.appendChild(div);
+                setTimeout(()=>div.remove(),2200);
+            }
+
+            // ---- 1) fetch() hooken ----
+            const _fetch = window.fetch;
+            window.fetch = async function(resource, init){
+                try{
+                if (typeof resource === 'string') report(resource);
+                else if (resource && resource.url) report(resource.url);
+                }catch(e){}
+                return _fetch.apply(this, arguments);
+            };
+
+            // ---- 2) XHR hooken ----
+            const _open = XMLHttpRequest.prototype.open;
+            XMLHttpRequest.prototype.open = function(method, url){
+                try{ report(url); }catch(e){}
+                return _open.apply(this, arguments);
+            };
+
+            // ---- 3) src-Zuweisungen (Audio/Video/Source) beobachten ----
+            const targets = [HTMLMediaElement.prototype, HTMLAudioElement?.prototype, HTMLVideoElement?.prototype].filter(Boolean);
+            targets.forEach(proto=>{
+                const desc = Object.getOwnPropertyDescriptor(proto, 'src');
+                if(desc && desc.set){
+                Object.defineProperty(proto, 'src', {
+                    set(v){ try{ report(v); }catch(e){}; return desc.set.call(this, v); },
+                    get(){ return desc.get.call(this); }
+                });
+                }
             });
-            document.body.appendChild(div);
-            setTimeout(()=>div.remove(),2500);
-          }
-        }
-      }catch(e){console.error(e);}
-    },true);
-  }
 
-  // Hauptdokument
-  attachHook(document);
+            // ---- 4) MutationObserver: spätes Einfügen von <source src="...mp3"> ----
+            const mo = new MutationObserver(muts=>{
+                for(const m of muts){
+                for(const n of m.addedNodes){
+                    if(n && n.tagName){
+                    if(n.tagName.toLowerCase()==='source' && n.src) report(n.src);
+                    if((n.tagName.toLowerCase()==='audio' || n.tagName.toLowerCase()==='video') && n.src) report(n.src);
+                    // Links, die evtl. erst später gerendert werden
+                    if(n.querySelectorAll){
+                        n.querySelectorAll('a[href]').forEach(a=>{
+                        if(/\/media\/sounds\/.+\.mp3(\?|$)/i.test(a.href) || /\.mp3(\?|$)/i.test(a.href)) report(a.href);
+                        });
+                        n.querySelectorAll('source[src]').forEach(s=>report(s.src));
+                    }
+                    }
+                }
+                }
+            });
+            mo.observe(document.documentElement || document.body, { childList:true, subtree:true });
 
-  // iFrames nachträglich hooken
-  setTimeout(()=>{
-    document.querySelectorAll('iframe').forEach(f=>{
-      try{ attachHook(f.contentDocument); }
-      catch(e){ console.warn('❌ iframe hook fail', e); }
-    });
-  },2000);
+            // ---- 5) Initiale DOM-Abtastung ----
+            document.querySelectorAll('a[href], source[src], audio[src], video[src]').forEach(el=>{
+                if (el.href) report(el.href);
+                if (el.src)  report(el.src);
+            });
 
-  console.log('✅ Debug Hook installed');
-})();
-"""
+            console.log('✅ Network+DOM Hook installed');
+            })();
+            """
+
 
     print("🔍 Injecting JS into myinstants...")
     

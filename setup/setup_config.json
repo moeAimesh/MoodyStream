@@ -7,5 +7,8 @@
     "sad": 77.15575276246992,
     "surprise": 8.647313183323634e-05,
     "neutral": 1.0991657331509495
+  },
+  "sounds": {
+    "happy": "sounds/sound_cache/entspannter-wecker.mp3"
   }
 }
