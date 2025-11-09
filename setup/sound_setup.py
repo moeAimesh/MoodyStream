@@ -109,31 +109,55 @@ def run_sound_setup(user="default"):
         )
 
     js_hook = r"""
-        (function() {
-            console.log('🚀 JS Hook active');
-            const OriginalAudio = window.Audio;
-            window.Audio = function(...args) {
-                const audio = new OriginalAudio(...args);
-                const origSrc = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'src');
-                Object.defineProperty(audio, 'src', {
-                    set(value) {
-                        console.log('🎵 Sound detected:', value);
-                        if (value && value.endsWith('.mp3')) {
-                            try { window.pywebview.api.set_sound(value); }
-                            catch (err) { console.error('Send to Python failed:', err); }
-                        }
-                        origSrc.set.call(this, value);
-                    },
-                    get() { return origSrc.get.call(this); }
-                });
-                return audio;
-            };
-            console.log('✅ Audio hook ready');
-        })();
-    """
+(function(){
+  console.log('🚀 Debug Hook loaded');
 
+  function attachHook(doc){
+    if(!doc) return;
+    console.log('📡 Hook attached to', doc.URL);
+    doc.addEventListener('click', function(ev){
+      try{
+        let link = ev.target.closest('a');
+        if(link && link.href && (link.href.includes('/media/sounds/') || link.href.endsWith('.mp3'))){
+          console.log('🎵 Detected link:', link.href);
+          if(window.pywebview?.api?.set_sound){
+            window.pywebview.api.set_sound(link.href);
+            // Sichtbare Meldung
+            const div=document.createElement('div');
+            div.textContent='🎧 erkannt: '+link.href.split('/').pop();
+            Object.assign(div.style,{
+              position:'fixed',bottom:'10px',left:'10px',background:'rgba(0,0,0,0.8)',
+              color:'#fff',padding:'6px 10px',borderRadius:'6px',zIndex:999999,
+              fontFamily:'monospace',fontSize:'12px'
+            });
+            document.body.appendChild(div);
+            setTimeout(()=>div.remove(),2500);
+          }
+        }
+      }catch(e){console.error(e);}
+    },true);
+  }
+
+  // Hauptdokument
+  attachHook(document);
+
+  // iFrames nachträglich hooken
+  setTimeout(()=>{
+    document.querySelectorAll('iframe').forEach(f=>{
+      try{ attachHook(f.contentDocument); }
+      catch(e){ console.warn('❌ iframe hook fail', e); }
+    });
+  },2000);
+
+  console.log('✅ Debug Hook installed');
+})();
+"""
+
+    print("🔍 Injecting JS into myinstants...")
+    
     def inject_ui(window):
         window.evaluate_js(js_hook)
+        print("✅ JS Hook injected")
         # Floating Download-Button
         window.evaluate_js("""
             const btn = document.createElement('button');

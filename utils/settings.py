@@ -6,7 +6,7 @@ Nutzen:
 - Enthält zusätzlich erlaubte Keys (Emotionen/Gesten) und die Start-URL für myinstants.com.
 """
 
-"""
+
 from pathlib import Path
 
 
@@ -27,4 +27,3 @@ ALLOWED_BEHAVIOUR_KEYS = [
 # Start-URL für myinstants (kannst du anpassen)
 MYINSTANTS_URL = "https://www.myinstants.com/en/index/de/"
 
-"""
