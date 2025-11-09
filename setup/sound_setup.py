@@ -1,12 +1,23 @@
-"""Aufgabe: Öffnet pywebview mit myinstants.com.
-Nutzer klickt selbst auf „Download“. Dein JS fängt nur den Klick ab, lädt MP3 in sounds/sound_cache/, fragt: „Zu welchem Key? (z. B. ok, thumbsup, laugh)“ und schreibt in sound_map.json und ins Profil.
+"""Aufgabe: Öffnet PyWebView mit myinstants.com. Ein JS-Hook erkennt alle MP3-Aufrufe
+(fetch, XHR, src-Zuweisungen, dynamische <source>-Einfügungen) und meldet die URL an Python.
+Über den Button „Download last sound“ wird die zuletzt erkannte MP3 (falls nötig) geladen,
+der Nutzer gibt einen Key (z. B. ok, thumbsup, happy) ein und die Zuordnung wird gespeichert.
 
-Eingaben: MP3-URL vom Nutzer-Klick + frei gewählter Key.
+Eingaben: automatisch erkannte MP3-URL (durch Nutzeraktion auf myinstants) + frei gewählter Key.
 
-Ausgaben: lokale MP3 + Mapping {key: relative_path}.
+Ausgaben: lokale MP3 in sounds/sound_cache/ + Mapping {key: relative_path} in
+- sounds/sound_map.json (einzelner Key)
+- setup/setup_config.json unter "sounds" (Merge, keine Überschreibung)
 
-Wichtig: kein Auto-Massendownload; Download nur nach Nutzeraktion.
-mehr recherche ob man überhaupt "einfach so" ein button einfügen darf etc. (rechtliches)."""
+Verhalten:
+- Nur Nutzeraktionen: kein Auto-Massendownload.
+- Bereits vorhandene Dateien werden nicht erneut geladen, können aber neu gemappt werden.
+- URLs werden normalisiert (relative → absolute), nur .mp3 wird akzeptiert.
+
+Hinweis (rechtlich/technisch):
+- Nur einzelne, manuell ausgelöste Downloads verwenden; keine automatisierte Sammlung.
+- Prüfe Nutzungsrechte/Lizenzen der Sounds bei externer/öffentlicher Verwendung.
+"""
 
 import webview
 import requests
