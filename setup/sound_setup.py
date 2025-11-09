@@ -12,12 +12,13 @@ import webview
 import requests
 import os
 import json
-from utils.json_manager import save_json
+from utils.json_manager import save_json, update_json
+from utils.settings import CACHE as CACHE_DIR, SOUND_MAP_PATH, SETUP_CONFIG_PATH, ALLOWED_BEHAVIOUR_KEYS, MYINSTANTS_URL
+
 
 # --- Ordnerstruktur anpassen ---
-CACHE_DIR = os.path.join("sounds", "sound_cache")
 os.makedirs(CACHE_DIR, exist_ok=True)
-SOUND_MAP_PATH = os.path.join("sounds", "sound_map.json")
+
 
 # --------------------------------------------------
 # 🧠 PyWebView API: verwaltet Download & Sound-Link
