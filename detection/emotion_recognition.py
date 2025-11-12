@@ -1,23 +1,26 @@
-import os
 import json
 import time
+from pathlib import Path
 import numpy as np
 from deepface import DeepFace
 from collections import deque
 from statistics import mode
+
+from utils.settings import REST_FACE_MODEL_PATH
 
 class EmotionRecognition:
     """
     Erkennt stabile Emotionen mit Glättung + Rest-Face-Abgleich.
     """
 
-    def __init__(self, model_path="setup/rest_face_model.json",
+    def __init__(self, model_path=REST_FACE_MODEL_PATH,
                  threshold=10.0, interval=0.3, history_size=7):
         """
         threshold: Distanz-Schwelle für Rest-Face.
         interval: Analyseintervall (Sekunden).
         history_size: Wie viele letzte Emotionen gespeichert werden.
         """
+        self.model_path = Path(model_path)
         self.threshold = threshold
         self.interval = interval
         self.last_analysis = 0
@@ -25,11 +28,11 @@ class EmotionRecognition:
         self.mean_vector = None
         self.stable_emotion = None
 
-        if os.path.exists(model_path):
-            with open(model_path, "r") as f:
+        if self.model_path.exists():
+            with self.model_path.open("r") as f:
                 data = json.load(f)
                 self.mean_vector = np.array(data["mean_vector"])
-            print(f"✅ Rest-Face mean_vector geladen ({model_path})")
+            print(f"✅ Rest-Face mean_vector geladen ({self.model_path})")
         else:
             print("⚠️ Kein Rest-Face-Modell gefunden. Bitte Kalibrierung ausführen!")
 

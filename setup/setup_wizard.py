@@ -25,10 +25,11 @@ Gesichts-Baseline erfassen,
 Sounds je Verhalten/Emotion zuordnen,
 alles in Profil-JSON speichern.
 """
+#python -m setup.setup_wizard
 
-import os
-from setup.sound_setup import run_sound_setup
-from setup.face_setup import RestFaceCalibrator
+from .sound_setup import run_sound_setup
+from .face_setup import RestFaceCalibrator
+from utils.settings import REST_FACE_MODEL_PATH
 
 
 def run_rest_face_setup(user="default"):
@@ -36,7 +37,7 @@ def run_rest_face_setup(user="default"):
     Führt die neue Rest-Face-Kalibrierung aus.
     """
     print("📷 Starte Rest-Face-Kalibrierung ...")
-    model_path = f"setup/{user}_rest_face_model.json"
+    model_path = REST_FACE_MODEL_PATH
 
     calibrator = RestFaceCalibrator(model_path=model_path)
     success = calibrator.record_rest_face(duration=20, analyze_every=5)

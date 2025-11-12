@@ -18,6 +18,8 @@ from detection.emotion_recognition import EmotionRecognition
 from sounds.play_sound import play
 from utils.mediapipe_fix import apply_fix
 from detection.crop_face import crop_face
+from utils.json_manager import load_json
+from utils.settings import SOUND_MAP_PATH
 apply_fix()
 
 
@@ -40,14 +42,14 @@ def start_detection():
         # ✋ GESTENERKENNUNG – nutzt das ganze Frame!
         gestures = detect_gestures(frame_full)
         current_time = time.time()
-
+        sounds = load_json(SOUND_MAP_PATH)
         # 🖐️ Beispiel: Daumen-hoch-Geste → Sound
         if "thumbsup" in gestures:
             if thumb_start_time is None:
                 thumb_start_time = current_time
                 sound_played = False
             elif (current_time - thumb_start_time) >= 1 and not sound_played:
-                play("sounds/sound_cache/Rammus_Select.mp3")
+                play(sounds["ok"])
                 sound_played = True
         else:
             thumb_start_time = None

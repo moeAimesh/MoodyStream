@@ -4,7 +4,9 @@ from sklearn.neighbors import NearestNeighbors
 import numpy as np
 import json
 import time
-import os
+from pathlib import Path
+
+from utils.settings import REST_FACE_MODEL_PATH
 
 
 class RestFaceCalibrator:
@@ -13,8 +15,8 @@ class RestFaceCalibrator:
     Speichert DeepFace-Emotionsvektoren und trainiert daraus ein Nearest-Neighbour-Modell.
     """
 
-    def __init__(self, model_path="setup/rest_face_model.json"):
-        self.model_path = model_path
+    def __init__(self, model_path=REST_FACE_MODEL_PATH):
+        self.model_path = Path(model_path)
         self.vectors = []
         self.model = None
 
@@ -93,8 +95,8 @@ class RestFaceCalibrator:
             "mean_vector": np.mean(self.vectors, axis=0).tolist()
         }
 
-        os.makedirs(os.path.dirname(self.model_path), exist_ok=True)
-        with open(self.model_path, "w") as f:
+        self.model_path.parent.mkdir(parents=True, exist_ok=True)
+        with self.model_path.open("w") as f:
             json.dump(model_data, f, indent=2)
 
         print(f"💾 Modell gespeichert unter: {self.model_path}")
@@ -121,7 +123,7 @@ class RestFaceCalibrator:
 # 🔹 Hauptfunktion – kann direkt ausgeführt werden
 # -------------------------------------------------------
 if __name__ == "__main__":
-    calibrator = RestFaceCalibrator(model_path="setup/rest_face_model.json")
+    calibrator = RestFaceCalibrator(model_path=REST_FACE_MODEL_PATH)
     if calibrator.record_rest_face(duration=30, analyze_every=5):
         if calibrator.train():
             calibrator.save_model()
