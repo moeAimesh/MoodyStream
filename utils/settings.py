@@ -43,3 +43,10 @@ def rest_face_model_file() -> str:
 BASE = BASE_DIR
 CACHE = SOUND_CACHE_DIR
 PROFILES = PROFILES_DIR
+
+# Tracking configuration
+TRACKING_MODE = "single"  # "single" or "multi"
+SINGLE_FACE_TRACKER = "CSRT"  # CSRT, KCF, MOSSE
+FACE_DETECT_INTERVAL_SINGLE = 25  # frames between detections in single mode
+FACE_DETECT_INTERVAL_MULTI = 1  # run detection every N frames in multi mode
+MAX_MISSING_FRAMES = 10  # tolerance before dropping a track
