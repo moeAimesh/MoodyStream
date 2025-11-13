@@ -1,38 +1,64 @@
-"""Aufgabe: sicheres Lesen/Schreiben/Updaten (mit Lock, Fallback).
+"""Utility helpers for safely reading and writing shared JSON files."""
 
-API:
+from __future__ import annotations
 
-load_json(path) -> dict
-save_json(path, data: dict)
-update_json(path, key, value)
+import json
+from pathlib import Path
+from typing import Any, Dict, Mapping, MutableMapping, Union
 
-Damit kann man später in setup_config.json mehrere Setup-Ergebnisse speichern (z. B. Gesicht + Sounds).
-"""
+PathLike = Union[str, "Path"]
 
 
-import json, os
+def _as_path(path: PathLike) -> Path:
+    return Path(path)
 
-def load_json(path):
-    """Lädt JSON-Datei oder gibt leeres Dict zurück, wenn leer oder fehlerhaft."""
-    if not os.path.exists(path):
+
+def _ensure_parent(path: Path) -> None:
+    """Create parent folders if they do not exist yet."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+
+def load_json(path: PathLike) -> Dict[str, Any]:
+    """Load JSON and always return a dict, even for empty/malformed files."""
+    target = _as_path(path)
+    if not target.exists():
         return {}
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            content = f.read().strip()
-            if not content:
-                return {}  # ⚙️ leer -> kein Fehler
-            return json.loads(content)
+        content = target.read_text(encoding="utf-8").strip()
+        if not content:
+            return {}
+        return json.loads(content)
     except json.JSONDecodeError:
-        print(f"⚠️ Warnung: Datei {path} ist kein gültiges JSON, wird neu erstellt.")
+        print(f" s   ? Warnung: Datei {target} ist kein gültiges JSON, wird neu erstellt.")
         return {}
 
-def save_json(path, key, value):
-    data = load_json(path)
-    data[key] = value
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
 
-        
-def update_json(path, key, value):
-    pass
+def save_json(path: PathLike, key: str, value: Any) -> None:
+    """
+    Persist a single key/value pair in the JSON file without dropping other keys.
+    Useful for simple `{key: value}` assignments.
+    """
+    target = _as_path(path)
+    data = load_json(target)
+    data[key] = value
+    _ensure_parent(target)
+    target.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def update_json(path: PathLike, key: str, value: Mapping[str, Any]) -> None:
+    """
+    Merge dictionaries under `key` instead of overwriting them entirely.
+    Falls back to `save_json` semantics if the existing value is not a dict.
+    """
+    target = _as_path(path)
+    data = load_json(target)
+    current = data.get(key)
+
+    if isinstance(current, MutableMapping) and isinstance(value, Mapping):
+        current.update(value)
+        data[key] = current
+    else:
+        data[key] = dict(value) if isinstance(value, Mapping) else value
+
+    _ensure_parent(target)
+    target.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")

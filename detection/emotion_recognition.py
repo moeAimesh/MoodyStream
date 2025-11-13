@@ -48,7 +48,7 @@ class EmotionRecognition:
         self.last_analysis = now
 
         try:
-            result = DeepFace.analyze(frame, actions=['emotion'], enforce_detection=False)
+            result = DeepFace.analyze(frame, actions=['emotion'], enforce_detection=False, detector_backend= 'mediapipe')
             emotion_scores = result[0]["emotion"]
             dominant = result[0]["dominant_emotion"]
             v_current = np.array(list(emotion_scores.values()))
