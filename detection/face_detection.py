@@ -6,6 +6,11 @@ import cv2
 import mediapipe as mp
 
 from utils.mediapipe_fix import apply_fix
+from utils.settings import (
+    FACE_DETECTOR_PAD_X,
+    FACE_DETECTOR_PAD_Y_BOTTOM,
+    FACE_DETECTOR_PAD_Y_TOP,
+)
 
 apply_fix()
 
@@ -20,9 +25,9 @@ def _detection_to_bbox(det, frame_shape):
     if w <= 0 or h <= 0:
         return None
 
-    pad_x = int(w * W * 0.15)
-    pad_y_top = int(h * H * 0.2)
-    pad_y_bottom = int(h * H * 0.08)
+    pad_x = int(w * W * FACE_DETECTOR_PAD_X)
+    pad_y_top = int(h * H * FACE_DETECTOR_PAD_Y_TOP)
+    pad_y_bottom = int(h * H * FACE_DETECTOR_PAD_Y_BOTTOM)
 
     x1 = max(0, int(x * W) - pad_x)
     y1 = max(0, int(y * H) - pad_y_top)

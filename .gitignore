@@ -1,4 +1,6 @@
 venv/
 __pycache__/
 branch_pushes/
-TODO.txt/
+TODO.txt
+detection/virtual_cam_test.py
+setup/samples

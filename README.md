@@ -38,6 +38,7 @@ B5 --> B6[default_face_baseline.json]
 C --> C1[camera_stream.py]
 C --> C2[gesture_recognition.py]
 C --> C3[face_analyzer.py]
+
 C --> C4[emotion_recognition.py]
 C --> C5[detectors/]
 C5 --> C6[thumbs_up.py]
@@ -148,6 +149,23 @@ Format: <username>_face_baseline.json
 Ruft pro Frame:
 
 gesture_recognition.py → erkennt Gesten (z. B. Daumen hoch)
+
+Optional: Mit dem Parameter `virtual_cam=True` (siehe `detection.virtual_cam_test`) werden die annotierten Frames parallel an eine virtuelle Kamera geschickt.
+
+🎥 Virtual-Cam-Test (detection/virtual_cam_test.py)
+
+Startet die komplette Moody-Detection (Gesten + Emotionserkennung) und spiegelt den annotierten Feed via `pyvirtualcam` in eine virtuelle Kamera, sodass OBS/Discord/Teams nicht direkt auf die Hardware zugreifen müssen.
+
+Aufruf:
+
+```
+python -m detection.virtual_cam_test --no-window --preview
+```
+
+- `--no-window` deaktiviert das klassische OpenCV-Fenster (ansonsten bleibt es sichtbar).
+- `--preview` öffnet bei deaktiviertem Fenster eine kleine Kontrollansicht.
+- `--camera-index`, `--width`, `--height`, `--fps` überschreiben Kamera-Quelle bzw. Virtual-Cam-Parameter.
+
 face_analyzer.py → analysiert Emotionen
 
 Wenn eine bekannte Emotion oder Geste erkannt wird:

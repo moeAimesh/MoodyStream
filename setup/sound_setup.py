@@ -2,8 +2,15 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Optional
+import importlib.util
+import platform
 import requests
 import webview
+try:  # pywebview >= 4 exposes explicit exception types
+    from webview.errors import WebViewException
+except Exception:  # pragma: no cover - fallback for older versions
+    class WebViewException(Exception):
+        ...
 from utils.json_manager import save_json, update_json
 from utils.settings import (
     ALLOWED_BEHAVIOUR_KEYS,
@@ -20,10 +27,37 @@ def _normalize_url(url: str) -> str:
     if url.startswith("/"):
         return "https://www.myinstants.com" + url
     return url
+def _webview_supported() -> bool:
+    system = platform.system().lower()
+    if system == "windows":
+        if importlib.util.find_spec("clr") is None:
+            print("[sound_setup] pythonnet/clr not installed - pywebview UI unavailable.")
+            return False
+    return True
 class API:
     """JS bridge: receives detected mp3 URLs and triggers downloads."""
     def __init__(self) -> None:
         self.last_url: Optional[str] = None
+    def _ask_category(self, prompt_text: str, placeholder: str, allowed_str: str) -> Optional[str]:
+        window = webview.windows[0] if getattr(webview, "windows", []) else None
+        if window is not None:
+            try:
+                category = window.evaluate_js(
+                    f"prompt({json.dumps(prompt_text)}, {json.dumps(placeholder)})"
+                )
+                if category:
+                    return str(category).strip().lower()
+            except WebViewException:
+                print("[sound_setup] Browser prompt unavailable, switching to CLI input.")
+        print(
+            f"[sound_setup] CLI prompt - choose behavior ({allowed_str}). "
+            "Leave blank to skip."
+        )
+        try:
+            category = input("Behavior key: ").strip().lower()
+        except EOFError:  # pragma: no cover - defensive
+            return None
+        return category or None
     def set_sound(self, url: str) -> str:
         """Called from JS whenever an mp3 URL is detected."""
         try:
@@ -66,9 +100,7 @@ class API:
             f"Allowed: {allowed_str}"
         )
         placeholder = "happy"
-        category = webview.windows[0].evaluate_js(
-            f"prompt({json.dumps(prompt)}, {json.dumps(placeholder)})"
-        )
+        category = self._ask_category(prompt, placeholder, allowed_str)
         if not category:
             print("[sound_setup] No category entered, skipping.")
             return "SKIPPED"
@@ -147,9 +179,28 @@ JS_HOOK = r"""
     console.log('[Moody] JS hook installed');
 })();
 """
+def _run_cli_sound_setup(api: API) -> bool:
+    print("[sound_setup] Web UI unavailable - falling back to CLI sound assignment.")
+    print("Paste MP3 URLs from myinstants (or any .mp3) and map them to behaviors.")
+    allowed_str = ", ".join(ALLOWED_BEHAVIOUR_KEYS) if ALLOWED_BEHAVIOUR_KEYS else "any"
+    print(f"Allowed behavior keys: {allowed_str}")
+    while True:
+        try:
+            url = input("MP3 URL (blank to finish): ").strip()
+        except EOFError:
+            break
+        if not url:
+            break
+        api.set_sound(url)
+        result = api.download_last()
+        print(f"[sound_setup] Result: {result}")
+    print("[sound_setup] CLI sound setup complete.")
+    return True
 def run_sound_setup(user: str = "default") -> bool:
     """Entry point used by the setup wizard."""
     api = API()
+    if not _webview_supported():
+        return _run_cli_sound_setup(api)
     window = webview.create_window(
         title="[Moody] Sound Selection",
         url=MYINSTANTS_URL,
@@ -158,30 +209,40 @@ def run_sound_setup(user: str = "default") -> bool:
         js_api=api,
     )
     def inject_ui(win: webview.Window) -> None:
-        win.evaluate_js(JS_HOOK)
-        win.evaluate_js(
-            """
-            (function () {
-                const btn = document.createElement('button');
-                btn.textContent = 'Download last sound';
-                btn.style.position = 'fixed';
-                btn.style.top = '50%';
-                btn.style.right = '25px';
-                btn.style.transform = 'translateY(-50%)';
-                btn.style.zIndex = 9999;
-                btn.style.padding = '12px 20px';
-                btn.style.background = '#00cc66';
-                btn.style.border = 'none';
-                btn.style.color = '#fff';
-                btn.style.fontSize = '16px';
-                btn.style.borderRadius = '10px';
-                btn.style.cursor = 'pointer';
-                btn.onclick = () => window.pywebview.api.download_last();
-                document.body.appendChild(btn);
-            })();
-            """
-        )
-    webview.start(inject_ui, window)
+        try:
+            win.evaluate_js(JS_HOOK)
+            win.evaluate_js(
+                """
+                (function () {
+                    const btn = document.createElement('button');
+                    btn.textContent = 'Download last sound';
+                    btn.style.position = 'fixed';
+                    btn.style.top = '50%';
+                    btn.style.right = '25px';
+                    btn.style.transform = 'translateY(-50%)';
+                    btn.style.zIndex = 9999;
+                    btn.style.padding = '12px 20px';
+                    btn.style.background = '#00cc66';
+                    btn.style.border = 'none';
+                    btn.style.color = '#fff';
+                    btn.style.fontSize = '16px';
+                    btn.style.borderRadius = '10px';
+                    btn.style.cursor = 'pointer';
+                    btn.onclick = () => window.pywebview.api.download_last();
+                    document.body.appendChild(btn);
+                })();
+                """
+            )
+        except WebViewException as exc:
+            print(f"[sound_setup] WebView injection failed: {exc}")
+    try:
+        webview.start(inject_ui, window)
+    except WebViewException as exc:
+        print(f"[sound_setup] WebView not available ({exc}); enabling CLI fallback.")
+        return _run_cli_sound_setup(api)
+    except Exception as exc:
+        print(f"[sound_setup] Unexpected WebView error ({exc}); enabling CLI fallback.")
+        return _run_cli_sound_setup(api)
     return True
 if __name__ == "__main__":
     run_sound_setup()
