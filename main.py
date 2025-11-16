@@ -25,10 +25,10 @@ def main():
     print("🚀 Starting Moody Setup Wizard...")
 
     # Setup einmal starten (Gesicht + Sounds)
-    setup_success = run_setup_wizard()
-    if not setup_success:
-        print("❌ Setup abgebrochen oder fehlgeschlagen.")
-        return
+    #setup_success = run_setup_wizard()
+    #if not setup_success:
+    #    print("❌ Setup abgebrochen oder fehlgeschlagen.")
+    #    return
     
 
     print("\n✅ Setup abgeschlossen! Starte Hauptprogramm...\n")
