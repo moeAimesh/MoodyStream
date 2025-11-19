@@ -11,6 +11,7 @@ import numpy as np
 from deepface import DeepFace
 
 from detection.detectors.Filters import EWMAFilter, HiddenMarkovModelFilter
+from detection.emotion_heuristics import EmotionHeuristicScorer
 from utils.settings import (
     EMOTION_FILTER,
     EMOTION_SWITCH_FRAMES,
@@ -59,6 +60,7 @@ class EmotionRecognition:
         self.classifier_model = None
         self.classifier_model_type = None
         self.classifier_model_classes = None
+        self.heuristics = EmotionHeuristicScorer()
         self._load_profiles()
 
     def analyze_frame(self, frame, features=None, track_id: Optional[int] = None) -> Optional[str]:
@@ -100,8 +102,10 @@ class EmotionRecognition:
             ):
                 combined_vector = None
 
+            heuristic_scores = self.heuristics.score(feature_vec) if feature_vec is not None else {}
             emotion = None
             classifier_probs = None
+            confidence = None
             if self.classifier_model is not None and combined_vector is not None:
                 emotion, confidence, classifier_probs = self._predict_classifier_model(combined_vector)
                 if confidence < CLASSIFIER_CONFIDENCE:
@@ -111,18 +115,39 @@ class EmotionRecognition:
                 if confidence < CLASSIFIER_CONFIDENCE:
                     emotion = None
 
+            if classifier_probs is not None and heuristic_scores:
+                for label, bonus in heuristic_scores.items():
+                    if bonus <= 0:
+                        continue
+                    classifier_probs[self._label_index(label)] += float(bonus)
+                total = float(np.sum(classifier_probs))
+                if total > 0:
+                    classifier_probs = classifier_probs / total
+                    idx = int(np.argmax(classifier_probs))
+                    confidence = float(classifier_probs[idx])
+                    if confidence >= CLASSIFIER_CONFIDENCE:
+                        emotion = self.emotion_classes[idx]
+                    else:
+                        emotion = None
+
+            if emotion is None and heuristic_scores:
+                best_label = max(heuristic_scores, key=heuristic_scores.get)
+                if heuristic_scores[best_label] >= self.heuristics.min_score():
+                    emotion = best_label
+                    classifier_probs = self._label_to_vector(best_label)
+
             if emotion is None and self.profile_means:
                 emotion, dist, norm = self._predict_profile(v_current)
                 if emotion == "neutral" and dist is not None:
                     self._maybe_report_distance(dist, key, emotion)
                 if emotion is None:
-                    emotion = dominant
+                    emotion = "neutral"
             elif emotion is None and self.mean_vector is not None:
                 distance = np.linalg.norm(v_current - self.mean_vector)
                 self._maybe_report_distance(distance, key, "neutral")
-                emotion = "neutral" if distance < self.threshold else dominant
+                emotion = "neutral"
             elif emotion is None:
-                emotion = dominant
+                emotion = "neutral"
 
             measurement = None
             if classifier_probs is not None:
@@ -211,7 +236,13 @@ class EmotionRecognition:
     def _predict_classifier_model(self, vector):
         vector = self._scale_vector(vector)
         probs = self.classifier_model.predict_proba([vector])[0]
-        classes = getattr(self.classifier_model, "classes_", None) or self.classifier_model_classes or []
+        classes_attr = getattr(self.classifier_model, "classes_", None)
+        if classes_attr is not None:
+            classes = list(classes_attr)
+        elif self.classifier_model_classes:
+            classes = list(self.classifier_model_classes)
+        else:
+            classes = []
         if not classes:
             raise RuntimeError("Classifier-Klassen sind nicht definiert.")
         idx = int(np.argmax(probs))
