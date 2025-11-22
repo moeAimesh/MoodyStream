@@ -11,8 +11,10 @@ from sklearn.ensemble import RandomForestClassifier
 import joblib
 import numpy as np
 import json
+import sys
 import time
 from pathlib import Path
+from typing import List, Optional, Sequence, Tuple
 from numpy.random import default_rng
 
 try:
@@ -20,21 +22,22 @@ try:
 except ImportError:
     LGBMClassifier = None
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from detection.face_detection import detect_faces
 from detection.preprocessing import preprocess_face
 from detection.facemesh_features import extract_facemesh_features
 from utils.settings import REST_FACE_MODEL_PATH, TRAINED_MODEL
 
-EMOTION_PROFILES = [
+EMOTION_PROFILES: List[Tuple[str, str]] = [
     ("fear", "Bitte ?ngstlich erstaunt schauen (Augen aufrei?en, Mund leicht ge?ffnet)."),
     ("happy", "Bitte lachen / fr?hlich schauen (breites L?cheln)."),
     ("sad", "Bitte traurig oder betr?bt schauen (Mundwinkel nach unten, Blick senken)."),
     ("surprise", "Bitte ?berrascht schauen (Augenbrauen hoch, Mund zu einem 'O')."),
     ("neutral", "Bitte entspannt / neutral schauen."),
 ]
-
-
-
 class RestFaceCalibrator:
     """
     Kalibriert mehrere Emotionen des Nutzers.
@@ -58,10 +61,25 @@ class RestFaceCalibrator:
         self.computed_thresholds = {"gate": 0.60, "margin": 0.08}
         self.neutral_feature_mean = None
 
-    def record_emotions(self, duration=10, analyze_every=5):
+    def record_emotions(
+        self,
+        emotions: Optional[Sequence[str]] = None,
+        duration: int = 10,
+        analyze_every: int = 5,
+    ):
         """
         Führt den Nutzer durch verschiedene Emotionen und sammelt Embeddings.
+        Optional können einzelne Emotionen übergeben werden, um gezielt Profile zu aktualisieren.
         """
+        try:
+            targets = self._resolve_emotions(emotions)
+        except ValueError as exc:
+            print(f"⚠️ {exc}")
+            return False
+        if not targets:
+            print("⚠️ Keine Emotionen ausgewählt.")
+            return False
+
         cam = cv2.VideoCapture(0)
         cam.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         cam.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
@@ -69,81 +87,138 @@ class RestFaceCalibrator:
         # Warm-up: Modelle/Kamera initialisieren, bevor Samples gezählt werden.
         self._warmup_session(cam)
 
+        reset_profiles = emotions is None
+        if reset_profiles:
+            self.profiles = {}
+
         try:
-            for emotion, instruction in EMOTION_PROFILES:
-                if not self._wait_for_start(cam, emotion, instruction):
-                    print("?? Abgebrochen durch Nutzer.")
+            for emotion, instruction in targets:
+                payload = self._capture_emotion_session(
+                    cam,
+                    emotion,
+                    instruction,
+                    duration=duration,
+                    analyze_every=analyze_every,
+                )
+                if payload is None:
                     return False
-
-                vectors = []
-                feature_vectors = []
-                sample_crops = []
-                frame_count = 0
-                start = time.time()
-                print(f"\n�Y\"� Profil '{emotion}' – Aufnahme gestartet")
-
-                while time.time() - start < duration:
-                    ret, frame = cam.read()
-                    if not ret:
-                        continue
-
-                    boxes = detect_faces(frame)
-                    if boxes:
-                        x, y, w, h = boxes[0]
-                        cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-
-                    cv2.putText(frame, f"Profil: {emotion}", (40, 50),
-                                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
-                    cv2.imshow("Emotion Profiling", frame)
-
-                    if cv2.waitKey(1) & 0xFF == 27:
-                        print("�?O Abgebrochen")
-                        return False
-
-                    if frame_count % analyze_every == 0 and boxes:
-                        processed = preprocess_face(frame, boxes[0])
-                        if processed is None:
-                            frame_count += 1
-                            continue
-                        features = extract_facemesh_features(frame, boxes[0])
-                        if features is None:
-                            frame_count += 1
-                            continue
-                        try:
-                            result = DeepFace.analyze(
-                                processed,
-                                actions=["emotion"],
-                                enforce_detection=False,
-                                detector_backend="mediapipe",
-                            )
-                            emotion_vec = np.array(list(result[0]["emotion"].values()))
-                            vectors.append(emotion_vec)
-                            feature_vectors.append(features)
-                            if len(sample_crops) < 3:
-                                sample_crops.append(processed)
-                            print(f"�YY� {emotion}: Sample {len(vectors)}")
-                        except Exception as exc:
-                            print("�s���? Analysefehler:", exc)
-
-                    frame_count += 1
-
-                if len(vectors) < 3:
-                    print(f"�s���? Zu wenige Samples für {emotion}. Bitte erneut versuchen.")
-                    return False
-
-                self.profiles[emotion] = {
-                    "vectors": vectors,
-                    "features": feature_vectors,
-                    "samples": sample_crops,
-                }
+                self.profiles[emotion] = payload
         finally:
             cam.release()
             cv2.destroyAllWindows()
 
         self.neutral_feature_mean = self._compute_neutral_feature_mean()
         self._save_snapshot()
-        print("�o. Alle Emotionen erfolgreich erfasst.")
+        if emotions is None:
+            print("�o. Alle Emotionen erfolgreich erfasst.")
+        else:
+            joined = ", ".join(e for e, _ in targets)
+            print(f"✅ Emotion(en) aktualisiert: {joined}")
         return True
+
+    def record_single_emotion(self, emotion: str, duration: int = 10, analyze_every: int = 5) -> bool:
+        """Convenience-Methode, um genau eine Emotion aufzunehmen."""
+        return self.record_emotions(emotions=[emotion], duration=duration, analyze_every=analyze_every)
+
+    def _resolve_emotions(self, emotions: Optional[Sequence[str]]) -> List[Tuple[str, str]]:
+        if emotions is None:
+            return list(EMOTION_PROFILES)
+        resolved: List[Tuple[str, str]] = []
+        seen = set()
+        for raw in emotions:
+            if raw is None:
+                continue
+            name = raw.strip().lower()
+            match = next((item for item in EMOTION_PROFILES if item[0].lower() == name), None)
+            if match is None:
+                raise ValueError(f"Unbekannte Emotion: {raw}")
+            if match[0] in seen:
+                continue
+            resolved.append(match)
+            seen.add(match[0])
+        return resolved
+
+    def _capture_emotion_session(
+        self,
+        cam,
+        emotion: str,
+        instruction: str,
+        *,
+        duration: int,
+        analyze_every: int,
+    ):
+        if not self._wait_for_start(cam, emotion, instruction):
+            print("?? Abgebrochen durch Nutzer.")
+            return None
+
+        vectors = []
+        feature_vectors = []
+        sample_crops = []
+        frame_count = 0
+        start = time.time()
+        print(f"\n�Y\"� Profil '{emotion}' – Aufnahme gestartet")
+
+        while time.time() - start < duration:
+            ret, frame = cam.read()
+            if not ret:
+                continue
+
+            boxes = detect_faces(frame)
+            if boxes:
+                x, y, w, h = boxes[0]
+                cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+
+            cv2.putText(
+                frame,
+                f"Profil: {emotion}",
+                (40, 50),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1,
+                (0, 255, 255),
+                2,
+            )
+            cv2.imshow("Emotion Profiling", frame)
+
+            if cv2.waitKey(1) & 0xFF == 27:
+                print("�?O Abgebrochen")
+                return None
+
+            if frame_count % analyze_every == 0 and boxes:
+                processed = preprocess_face(frame, boxes[0])
+                if processed is None:
+                    frame_count += 1
+                    continue
+                features = extract_facemesh_features(frame, boxes[0])
+                if features is None:
+                    frame_count += 1
+                    continue
+                try:
+                    result = DeepFace.analyze(
+                        processed,
+                        actions=["emotion"],
+                        enforce_detection=False,
+                        detector_backend="mediapipe",
+                    )
+                    emotion_vec = np.array(list(result[0]["emotion"].values()))
+                    vectors.append(emotion_vec)
+                    feature_vectors.append(features)
+                    if len(sample_crops) < 3:
+                        sample_crops.append(processed)
+                    print(f"�YY� {emotion}: Sample {len(vectors)}")
+                except Exception as exc:
+                    print("�s���? Analysefehler:", exc)
+
+            frame_count += 1
+
+        if len(vectors) < 3:
+            print(f"�s���? Zu wenige Samples für {emotion}. Bitte erneut versuchen.")
+            return None
+
+        return {
+            "vectors": vectors,
+            "features": feature_vectors,
+            "samples": sample_crops,
+        }
 
     def train(self):
         """
@@ -500,8 +575,48 @@ class RestFaceCalibrator:
         return True
 
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Rest-Face Kalibrierung für Moody.")
+    parser.add_argument(
+        "-e",
+        "--emotion",
+        action="append",
+        help="Name einer Emotion (z. B. happy). Mehrfach nutzbar, um mehrere gezielt aufzunehmen.",
+    )
+    parser.add_argument(
+        "--list-emotions",
+        action="store_true",
+        help="Zeigt alle verfügbaren Emotionen samt Anleitung.",
+    )
+    parser.add_argument(
+        "--duration",
+        type=int,
+        default=12,
+        help="Aufnahmedauer pro Emotion (Sekunden). Standard: 12",
+    )
+    parser.add_argument(
+        "--analyze-every",
+        type=int,
+        default=5,
+        help="Frame-Schrittweite für die Analyse. Standard: 5",
+    )
+    args = parser.parse_args()
+
+    if args.list_emotions:
+        print("Verfügbare Emotionen:")
+        for emotion, instruction in EMOTION_PROFILES:
+            print(f" - {emotion}: {instruction}")
+        raise SystemExit(0)
+
     calibrator = RestFaceCalibrator(model_path=REST_FACE_MODEL_PATH)
-    if calibrator.record_emotions(duration=12, analyze_every=5):
+    if args.emotion:
+        calibrator.load_snapshot()
+    if calibrator.record_emotions(
+        emotions=args.emotion,
+        duration=args.duration,
+        analyze_every=args.analyze_every,
+    ):
         calibrator.train()
         calibrator.save_model()
         calibrator.visualize_space()
