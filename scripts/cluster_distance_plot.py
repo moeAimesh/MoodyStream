@@ -5,13 +5,21 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import List, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
-from scipy.cluster.hierarchy import dendrogram, linkage
-from scipy.spatial.distance import squareform
+try:
+    from scipy.cluster.hierarchy import dendrogram, linkage
+    from scipy.spatial.distance import squareform
+except ImportError as exc:  # pragma: no cover - optional dependency
+    raise SystemExit("Dieses Skript benötigt SciPy. Bitte `pip install scipy` ausführen.") from exc
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from utils.settings import REST_FACE_MODEL_PATH
 

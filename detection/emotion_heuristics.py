@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, Sequence
 
 import numpy as np
@@ -19,15 +19,14 @@ BLOCK_SPECS = [
 ]
 
 SURPRISE_MOUTH_OPEN_MIN = 0.10
-FEAR_LID_OPEN_MIN = 0.065
-DISGUST_NOSTRIL_WIDTH_MIN = 0.45
-DISGUST_BRIDGE_GAP_MAX = 0.03
+FEAR_LID_OPEN_MIN = 0.06
 SAD_DROP_MIN = 0.24
-SAD_AVG_MIN = 0.29
+SAD_AVG_MIN = 0.30
 SAD_MOUTH_OPEN_MAX = 0.16
 
 
 class EmotionRules:
+    """Defines specific geometric rules for different emotions."""
     def __init__(self):
         cursor = 0
         self.slices: Dict[str, slice] = {}
@@ -45,12 +44,6 @@ class EmotionRules:
     def fear(self, features: np.ndarray) -> bool:
         lid = self._get_block(features, "lid_aperture")
         return float(np.mean(lid[:2])) >= FEAR_LID_OPEN_MIN
-
-    def disgust(self, features: np.ndarray) -> bool:
-        nose = self._get_block(features, "nose_flare")
-        width_ok = nose[0] >= DISGUST_NOSTRIL_WIDTH_MIN
-        bridge_ok = nose[4] <= DISGUST_BRIDGE_GAP_MAX if nose.size >= 5 else False
-        return width_ok and bridge_ok
 
     def happy(self, features: np.ndarray) -> bool:
         mouth = self._get_block(features, "mouth_corner")
@@ -72,18 +65,16 @@ class EmotionRules:
 
 @dataclass
 class EmotionHeuristicScorer:
+    """Validates emotion predictions against a set of geometric rules."""
     min_confidence: float = 0.45
     debug: bool = False
     debug_interval: int = 200
+    neutral_baseline: np.ndarray | None = None
+    rules: EmotionRules = field(default_factory=EmotionRules, repr=False)
+    total_dim: int = field(init=False)
 
     def __post_init__(self):
-        self.rules = EmotionRules()
-        cursor = 0
-        self.slices: Dict[str, slice] = {}
-        for name, length in BLOCK_SPECS:
-            self.slices[name] = slice(cursor, cursor + length)
-            cursor += length
-        self.total_dim = cursor
+        self.total_dim = self.rules.slices["mouth_depressor"].stop
         self._debug_counts: Dict[str, int] = defaultdict(int)
         self._debug_total = 0
 
@@ -98,47 +89,16 @@ class EmotionHeuristicScorer:
         if vec.size < self.total_dim or not np.all(np.isfinite(vec)):
             return True
 
-        actions: list[str] = []
-        if label == "surprise":
-            mouth = self._get_block(vec, "mouth_corner")
-            ok = mouth.size >= 1 and mouth[0] >= SURPRISE_MOUTH_OPEN_MIN
-            if not ok:
-                actions.append("surprise_block")
-            self._maybe_log_debug(actions)
-            return ok
-        if label == "fear":
-            lid = self._get_block(vec, "lid_aperture")
-            ok = lid.size >= 2 and float(np.mean(lid[:2])) >= FEAR_LID_OPEN_MIN
-            if not ok:
-                actions.append("fear_block")
-            self._maybe_log_debug(actions)
-            return ok
-        if label == "disgust":
-            nose = self._get_block(vec, "nose_flare")
-            width_ok = nose.size >= 1 and nose[0] >= DISGUST_NOSTRIL_WIDTH_MIN
-            bridge_ok = nose.size >= 5 and nose[4] <= DISGUST_BRIDGE_GAP_MAX
-            ok = width_ok and bridge_ok
-            if not ok:
-                actions.append("disgust_block")
-            self._maybe_log_debug(actions)
-            return ok
-        if label == "sad":
-            mouth_drop = self._get_block(vec, "mouth_depressor")
-            mouth_geom = self._get_block(vec, "mouth_corner")
-            left_ok = mouth_drop.size >= 1 and mouth_drop[0] >= SAD_DROP_MIN
-            right_ok = mouth_drop.size >= 2 and mouth_drop[1] >= SAD_DROP_MIN
-            avg_ok = mouth_drop.size >= 3 and mouth_drop[2] >= SAD_AVG_MIN
-            open_ok = mouth_geom.size < 1 or mouth_geom[0] <= SAD_MOUTH_OPEN_MAX
-            ok = left_ok and right_ok and avg_ok and open_ok
-            if not ok:
-                actions.append("sad_block")
-            self._maybe_log_debug(actions)
-            return ok
-        return True
+        rule_method = getattr(self.rules, label, None)
+        if rule_method is None:
+            return True  # Default to True if no specific rule exists
 
-    def _get_block(self, vec: np.ndarray, name: str) -> np.ndarray:
-        slc = self.slices.get(name)
-        return vec[slc] if slc else np.array([])
+        is_valid = rule_method(vec)
+
+        if not is_valid:
+            self._maybe_log_debug([f"{label}_block"])
+
+        return is_valid
 
     def _maybe_log_debug(self, actions: Sequence[str]) -> None:
         if not self.debug or not actions:

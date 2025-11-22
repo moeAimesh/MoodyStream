@@ -16,7 +16,7 @@ SOUND_MAP_PATH = SOUNDS_DIR / "sound_map.json"
 SETUP_CONFIG_PATH = SETUP_DIR / "setup_config.json"
 
 # Setup toggles
-FACE_SETUP_ENABLED = False  # Set False to reuse snapshots and skip new recordings
+FACE_SETUP_ENABLED = True  # Set False to reuse snapshots and skip new recordings
 IMPORTANCE_TEST = "ablation"  # "ablation", "permutation", or "coef"
 PLOT_AU = True  # Debug: overlay AU landmark points on crops during setup/detection
 FACEMESH_DEBUG_STATS = True  # If True, log facemesh feature min/max/variance periodically
@@ -27,6 +27,8 @@ EMOTION_SWITCH_FRAMES: int | None = None  # require N consistent frames before s
 EWMA_ALPHA = 0.3  # smoothing factor for EWMA filter
 EWMA_THRESHOLD = 0.55  # minimum confidence before EWMA commits a label
 HMM_STAY_PROB = 0.85  # probability to remain in same state per step for HMM smoothing
+HEURISTIC_DEBUG = True  # If True, log how often AU heuristics override model probs
+HEURISTIC_DEBUG_INTERVAL = 200  # print summary every N adjustments
 CLUSTER_RADIUS_QUANTILE = 0.99  # quantile for cluster boundary (e.g., 0.99 keeps 99% of samples)
 CLUSTER_NEIGHBOR_RATIO = 0.5  # max radius is this fraction of the nearest cluster distance
 MOTION_MAX_RATIO = 0.3  # fraction of face diagonal allowed per frame before motion skip
@@ -44,7 +46,6 @@ PREPROCESS_PAD_RATIO = 0.20  # final crop padding before DeepFace/AU; increase i
 ALLOWED_BEHAVIOUR_KEYS: List[str] = [
     "happy",
     "sad",
-    "angry",
     "surprise",
     "neutral",
     "thumbsup",
