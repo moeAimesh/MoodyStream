@@ -18,9 +18,10 @@ from detection.emotion_recognition import EmotionRecognition
 from sounds.play_sound import play
 from utils.mediapipe_fix import apply_fix
 from detection.crop_face import crop_face
-from utils.json_manager import load_json
-from utils.settings import SOUND_MAP_PATH
 import matplotlib.pyplot as plt
+from detection.emotion_mapper import map_emotion_to_sound
+from detection.gesture_mapper import map_gesture_to_sound
+
 apply_fix()
 
 FPS_BEFORE_GESTURE = []
@@ -52,11 +53,11 @@ def start_detection():
     cap = cv2.VideoCapture(0)
     thumb_start_time = None
     sound_played = False
-    sounds = load_json(SOUND_MAP_PATH)
 
     er = EmotionRecognition(threshold=10)
+    last_emotion = None  # merkt sich die letzte abgespielte Emotion
     print("🎥 Kamera gestartet – Gesten- und Emotionserkennung aktiv!")
-
+    
     while True:
         loop_start = time.perf_counter()
         ret, frame_full = cap.read()
@@ -82,14 +83,18 @@ def start_detection():
         # ✋ GESTENERKENNUNG – nutzt das ganze Frame!
         gestures = detect_gestures(frame_full)
         current_time = time.time()
-        # 🖐️ Beispiel: Daumen-hoch-Geste → Sound
-        if "thumbsup" in gestures:
+
+        # 🖐️ Beispiel: Geste (z. B. "thumbsup") → Sound über Mapper
+        if gestures:
             if thumb_start_time is None:
                 thumb_start_time = current_time
                 sound_played = False
             elif (current_time - thumb_start_time) >= 1 and not sound_played:
-                play(sounds["ok"])
-                sound_played = True
+                # Mapper entscheidet, welche Geste welchen Sound bekommt
+                g_key, g_path = map_gesture_to_sound(gestures)
+                if g_path:
+                    play(g_path)
+                    sound_played = True
         else:
             thumb_start_time = None
             sound_played = False
@@ -108,7 +113,14 @@ def start_detection():
         if face_crop is not None:
             emotion = er.analyze_frame(face_crop)
 
-
+        # 🎵 EMOTION → SOUND (über Mapper, nur bei Wechsel & nicht neutral)
+        if emotion != last_emotion:
+            if emotion and emotion != "neutral":
+                sound_key, sound_path = map_emotion_to_sound([emotion])
+                if sound_path:
+                    play(sound_path)
+            last_emotion = emotion
+            
         # 💬 VISUELLES FEEDBACK
         if "thumbsup" in gestures:
             cv2.putText(frame_full, "👍 Daumen hoch erkannt!",
