@@ -2,7 +2,7 @@
 
 Eingaben: Frame (BGR/RGB beachten).
 
-Ausgaben: z. B. {"happy":0.73,"neutral":0.2,"angry":0.05,...}.
+Ausgaben: z. B. {"happy":0.73,"neutral":0.2,"sad":0.05,...}.
 
 Performance-Hinweise: DeepFace-Modelle einmalig laden und cachen und idk seid offen und kreativ !!
 
@@ -10,5 +10,5 @@ Performance-Hinweise: DeepFace-Modelle einmalig laden und cachen und idk seid of
 
 API (Beispiel):
 def analyze_face_emotions(frame: np.ndarray) -> dict:
-    return {"happy":0.73,"neutral":0.2,"angry":0.05,...}
+    return {"happy":0.73,"neutral":0.2,"sad":0.05,...}
     """

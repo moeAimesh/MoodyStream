@@ -26,14 +26,13 @@ from detection.facemesh_features import extract_facemesh_features
 from utils.settings import REST_FACE_MODEL_PATH, TRAINED_MODEL
 
 EMOTION_PROFILES = [
-    ("angry", "Bitte verärgert / ernst schauen (Stirn runzeln, Augenbrauen zusammenziehen)."),
-    ("disgust", "Bitte angeekelt schauen (Nase rümpfen, Oberlippe hochziehen)."),
-    ("fear", "Bitte ängstlich erstaunt schauen (Augen aufreißen, Mund leicht geöffnet)."),
-    ("happy", "Bitte lachen / fröhlich schauen (breites Lächeln)."),
-    ("sad", "Bitte traurig oder betrübt schauen (Mundwinkel nach unten, Blick senken)."),
-    ("surprise", "Bitte überrascht schauen (Augenbrauen hoch, Mund zu einem 'O')."),
+    ("fear", "Bitte ?ngstlich erstaunt schauen (Augen aufrei?en, Mund leicht ge?ffnet)."),
+    ("happy", "Bitte lachen / fr?hlich schauen (breites L?cheln)."),
+    ("sad", "Bitte traurig oder betr?bt schauen (Mundwinkel nach unten, Blick senken)."),
+    ("surprise", "Bitte ?berrascht schauen (Augenbrauen hoch, Mund zu einem 'O')."),
     ("neutral", "Bitte entspannt / neutral schauen."),
 ]
+
 
 
 class RestFaceCalibrator:
@@ -55,6 +54,9 @@ class RestFaceCalibrator:
         self.scaler_params = None
         self.rng = default_rng()
         self.classifier_model_type = None
+        self.neutral_feature_mean = None
+        self.computed_thresholds = {"gate": 0.60, "margin": 0.08}
+        self.neutral_feature_mean = None
 
     def record_emotions(self, duration=10, analyze_every=5):
         """
@@ -64,14 +66,13 @@ class RestFaceCalibrator:
         cam.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         cam.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
+        # Warm-up: Modelle/Kamera initialisieren, bevor Samples gezählt werden.
+        self._warmup_session(cam)
+
         try:
             for emotion, instruction in EMOTION_PROFILES:
-                ready = input(
-                    f"\nProfil '{emotion}': {instruction}\n"
-                    "Drücke ENTER, wenn du bereit bist (oder gib 'q' zum Abbrechen ein): "
-                ).strip().lower()
-                if ready in {"q", "quit"}:
-                    print("�?� Abgebrochen durch Nutzer.")
+                if not self._wait_for_start(cam, emotion, instruction):
+                    print("?? Abgebrochen durch Nutzer.")
                     return False
 
                 vectors = []
@@ -139,6 +140,7 @@ class RestFaceCalibrator:
             cam.release()
             cv2.destroyAllWindows()
 
+        self.neutral_feature_mean = self._compute_neutral_feature_mean()
         self._save_snapshot()
         print("�o. Alle Emotionen erfolgreich erfasst.")
         return True
@@ -170,6 +172,8 @@ class RestFaceCalibrator:
             )
             self.classifier_model_type = model_type
             print("✅ Personalisierter Klassifikator trainiert.")
+        # Dynamic thresholds from neutral noise
+        self._compute_thresholds_from_neutral()
         return True
     def save_model(self):
         """
@@ -196,6 +200,8 @@ class RestFaceCalibrator:
             }
         if self.classifier_params:
             model_data["classifier"] = self.classifier_params
+        if self.neutral_feature_mean is not None:
+            model_data["neutral_feature_mean"] = self.neutral_feature_mean.tolist()
 
         self.model_path.parent.mkdir(parents=True, exist_ok=True)
         with self.model_path.open("w", encoding="utf-8") as f:
@@ -248,6 +254,113 @@ class RestFaceCalibrator:
             saved.append(str(path.relative_to(self.model_path.parent)))
         return saved
 
+    def _compute_neutral_feature_mean(self):
+        """Return mean AU feature vector for neutral, if available."""
+        neutral = self.profiles.get("neutral")
+        if not neutral:
+            return None
+        feats = neutral.get("features") or []
+        if not feats:
+            return None
+        feats_np = np.array(feats, dtype=float)
+        if feats_np.size == 0:
+            return None
+        return feats_np.mean(axis=0)
+
+    def _center_features(self, feats_np: np.ndarray) -> np.ndarray:
+        if self.neutral_feature_mean is None:
+            return feats_np
+        if feats_np.shape[1] != self.neutral_feature_mean.shape[0]:
+            return feats_np
+        return feats_np - self.neutral_feature_mean
+
+    def _compute_thresholds_from_neutral(self):
+        """Derive dynamic confidence/margin thresholds from neutral noise."""
+        neutral = self.profiles.get("neutral", {})
+        vecs = neutral.get("vectors") or []
+        if len(vecs) <= 10:
+            # Keep defaults
+            self.computed_thresholds = {"gate": 0.60, "margin": 0.08}
+            return
+        mat = np.array(vecs, dtype=float)
+        # assume last column is neutral prob; drop it to inspect non-neutral noise
+        if mat.shape[1] > 1:
+            non_neutral = mat[:, :-1]
+        else:
+            non_neutral = mat
+        max_noise = float(np.max(non_neutral))
+        std_noise = float(np.std(non_neutral))
+        suggested_gate = max_noise + 2.0 * std_noise
+        gate = float(np.clip(suggested_gate, 0.45, 0.85))
+        margin = float(max(0.05, std_noise * 1.5))
+        self.computed_thresholds = {"gate": gate, "margin": margin}
+        print(f"📊 Auto-Tuned Gate: {gate:.2f}, Margin: {margin:.2f}")
+
+    def _warmup_session(self, cam, seconds: float = 2.0, show_preview: bool = True):
+        """Read a few frames and run dummy DeepFace/FaceMesh to avoid cold-start drops."""
+        print("Warm-up: initialisiere Kamera/Modelle ... (Vorschau aktiv)")
+        start = time.time()
+        deepface_ran = False
+        while time.time() - start < seconds:
+            ret, frame = cam.read()
+            if not ret:
+                continue
+            if show_preview:
+                cv2.putText(
+                    frame,
+                    "Warm-up (Preview)",
+                    (20, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.8,
+                    (0, 255, 255),
+                    2,
+                )
+                cv2.imshow("Emotion Profiling", frame)
+                if cv2.waitKey(1) & 0xFF == 27:  # ESC to abort warm-up
+                    break
+            boxes = detect_faces(frame)
+            if boxes:
+                extract_facemesh_features(frame, boxes[0])  # prime FaceMesh
+                if not deepface_ran:
+                    processed = preprocess_face(frame, boxes[0])
+                    if processed is not None:
+                        try:
+                            DeepFace.analyze(
+                                processed,
+                                actions=["emotion"],
+                                enforce_detection=False,
+                                detector_backend="mediapipe",
+                            )
+                            deepface_ran = True
+                        except Exception:
+                            pass
+        print("Warm-up abgeschlossen. Starte Aufnahme ...")
+
+    def _wait_for_start(self, cam, emotion: str, instruction: str) -> bool:
+        """Show live preview and wait for ENTER/SPACE to start, ESC/Q to abort."""
+        print(f"\nProfil '{emotion}': {instruction}")
+        print("Drücke ENTER/SPACE zum Starten, ESC oder q zum Abbrechen.")
+        while True:
+            ret, frame = cam.read()
+            if not ret:
+                continue
+            overlay = frame.copy()
+            cv2.putText(
+                overlay,
+                f"Profil: {emotion} (ENTER/SPACE starten, ESC/q abbrechen)",
+                (20, 30),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (0, 255, 255),
+                2,
+            )
+            cv2.imshow("Emotion Profiling", overlay)
+            key = cv2.waitKey(1) & 0xFF
+            if key in {13, 10, 32}:  # Enter/Return or Space
+                return True
+            if key in {27, ord("q"), ord("Q")}:
+                return False
+
     def _prepare_classifier_dataset(self):
         # collect all embeddings and labels
         X = []
@@ -268,7 +381,7 @@ class RestFaceCalibrator:
             if not vecs or not feats or len(vecs) != len(feats):
                 continue
             vecs_np = np.array(vecs)
-            feats_np = np.array(feats)
+            feats_np = np.array(feats, dtype=float)
             if len(vecs_np) < max_len:
                 idx = self.rng.integers(0, len(vecs_np), size=max_len - len(vecs_np))
                 vecs_np = np.concatenate([vecs_np, vecs_np[idx]], axis=0)
@@ -277,8 +390,9 @@ class RestFaceCalibrator:
                 idx = self.rng.choice(len(vecs_np), size=max_len, replace=False)
                 vecs_np = vecs_np[idx]
                 feats_np = feats_np[idx]
+            feats_np = self._center_features(feats_np)
             combined = np.hstack([vecs_np, feats_np])
-            feature_len = feats_np.shape[1]
+            feature_len = combined.shape[1]
             X.append(combined)
             y.extend([emotion] * combined.shape[0])
         if not X or feature_len is None:
@@ -351,20 +465,22 @@ class RestFaceCalibrator:
                 "vectors": [vec.tolist() for vec in payload.get("vectors", [])],
                 "features": [feat.tolist() for feat in payload.get("features", [])],
             }
+        if self.neutral_feature_mean is not None:
+            data["neutral_feature_mean"] = self.neutral_feature_mean.tolist()
         self.snapshot_path.parent.mkdir(parents=True, exist_ok=True)
         with self.snapshot_path.open("w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
-        print(f"✅ Emotion-Snapshot gespeichert unter: {self.snapshot_path}")
+        print(f"?? Emotion-Snapshot gespeichert unter: {self.snapshot_path}")
 
     def load_snapshot(self):
         if not self.snapshot_path.exists():
-            print("⚠️ Kein gespeicherter Emotion-Snapshot gefunden.")
+            print("?? Kein gespeicherter Emotion-Snapshot gefunden.")
             return False
         with self.snapshot_path.open("r", encoding="utf-8") as f:
             data = json.load(f)
         profiles = data.get("profiles")
         if not profiles:
-            print("⚠️ Snapshot leer oder ungültig.")
+            print("?? Snapshot leer oder ung?ltig.")
             return False
         self.profiles = {}
         for emotion, payload in profiles.items():
@@ -375,9 +491,13 @@ class RestFaceCalibrator:
                 "features": features,
                 "samples": [],
             }
-        print(f"✅ Emotion-Snapshot geladen ({self.snapshot_path})")
+        neutral_mean = data.get("neutral_feature_mean")
+        if neutral_mean is not None:
+            self.neutral_feature_mean = np.array(neutral_mean, dtype=float)
+        else:
+            self.neutral_feature_mean = self._compute_neutral_feature_mean()
+        print(f"?? Emotion-Snapshot geladen ({self.snapshot_path})")
         return True
-
 
 if __name__ == "__main__":
     calibrator = RestFaceCalibrator(model_path=REST_FACE_MODEL_PATH)

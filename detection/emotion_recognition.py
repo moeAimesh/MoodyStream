@@ -11,6 +11,7 @@ import numpy as np
 from deepface import DeepFace
 
 from detection.detectors.Filters import EWMAFilter, HiddenMarkovModelFilter
+from detection.emotion_heuristics import EmotionHeuristicScorer
 from utils.settings import (
     EMOTION_FILTER,
     EMOTION_SWITCH_FRAMES,
@@ -18,9 +19,14 @@ from utils.settings import (
     EWMA_THRESHOLD,
     HMM_STAY_PROB,
     REST_FACE_MODEL_PATH,
+    HEURISTIC_DEBUG,
+    HEURISTIC_DEBUG_INTERVAL,
 )
 
 CLASSIFIER_CONFIDENCE = 0.55
+EXTREME_LABELS = {"fear", "sad", "surprise"}
+DEFAULT_GATE = 0.60
+DEFAULT_MARGIN = 0.08
 
 
 class EmotionRecognition:
@@ -44,7 +50,7 @@ class EmotionRecognition:
         self.filters = {}
         self.switch_frames = EMOTION_SWITCH_FRAMES
         self.switch_state = {}
-        self.emotion_classes = ["angry", "disgust", "fear", "happy", "sad", "surprise", "neutral"]
+        self.emotion_classes = ["fear", "happy", "sad", "surprise", "neutral"]
         self.class_index = {label: idx for idx, label in enumerate(self.emotion_classes)}
 
         self.profile_means = {}
@@ -59,6 +65,14 @@ class EmotionRecognition:
         self.classifier_model = None
         self.classifier_model_type = None
         self.classifier_model_classes = None
+        self.neutral_feature_mean = None
+        self.confidence_gate = DEFAULT_GATE
+        self.confidence_margin = DEFAULT_MARGIN
+        self.heuristics = EmotionHeuristicScorer(
+            debug=HEURISTIC_DEBUG,
+            debug_interval=HEURISTIC_DEBUG_INTERVAL,
+            neutral_baseline=None,
+        )
         self._load_profiles()
 
     def analyze_frame(self, frame, features=None, track_id: Optional[int] = None) -> Optional[str]:
@@ -81,7 +95,11 @@ class EmotionRecognition:
             emotion_scores = result[0]["emotion"]
             dominant = result[0]["dominant_emotion"]
             v_current = np.array(list(emotion_scores.values()))
-            feature_vec = np.array(features, dtype=float) if features is not None else None
+            feature_vec_raw = np.array(features, dtype=float) if features is not None else None
+            feature_vec = feature_vec_raw
+            if feature_vec is not None and self.neutral_feature_mean is not None:
+                if feature_vec.shape[0] == self.neutral_feature_mean.shape[0]:
+                    feature_vec = feature_vec - self.neutral_feature_mean
             combined_vector = None
             if self.classifier_feature_len is None:
                 combined_vector = v_current
@@ -102,27 +120,30 @@ class EmotionRecognition:
 
             emotion = None
             classifier_probs = None
+            confidence = None
             if self.classifier_model is not None and combined_vector is not None:
-                emotion, confidence, classifier_probs = self._predict_classifier_model(combined_vector)
-                if confidence < CLASSIFIER_CONFIDENCE:
-                    emotion = None
+                _, _, classifier_probs = self._predict_classifier_model(combined_vector)
             elif self.classifier is not None and combined_vector is not None:
-                emotion, confidence, classifier_probs = self._predict_classifier_linear(combined_vector)
-                if confidence < CLASSIFIER_CONFIDENCE:
-                    emotion = None
+                _, _, classifier_probs = self._predict_classifier_linear(combined_vector)
 
-            if emotion is None and self.profile_means:
-                emotion, dist, norm = self._predict_profile(v_current)
-                if emotion == "neutral" and dist is not None:
-                    self._maybe_report_distance(dist, key, emotion)
-                if emotion is None:
-                    emotion = dominant
-            elif emotion is None and self.mean_vector is not None:
-                distance = np.linalg.norm(v_current - self.mean_vector)
-                self._maybe_report_distance(distance, key, "neutral")
-                emotion = "neutral" if distance < self.threshold else dominant
-            elif emotion is None:
-                emotion = dominant
+            if classifier_probs is not None:
+                top2 = np.partition(classifier_probs, -2)[-2:]
+                idx = int(np.argmax(classifier_probs))
+                confidence = float(classifier_probs[idx])
+                candidate = self.emotion_classes[idx] if confidence >= CLASSIFIER_CONFIDENCE else None
+                if candidate in EXTREME_LABELS:
+                    margin = confidence - float(top2[0] if classifier_probs.size > 1 else 0.0)
+                    if confidence < self.confidence_gate or margin < self.confidence_margin:
+                        candidate = None
+                        classifier_probs = None
+                if candidate and feature_vec_raw is not None:
+                    if not self.heuristics.validate(candidate, feature_vec_raw):
+                        candidate = None
+                        classifier_probs = None
+                emotion = candidate
+
+            if emotion is None:
+                emotion = "neutral"
 
             measurement = None
             if classifier_probs is not None:
@@ -170,6 +191,12 @@ class EmotionRecognition:
             return
 
         self.classifier_feature_len = classifier.get("feature_length")
+        neutral_mean = data.get("neutral_feature_mean")
+        if neutral_mean is not None:
+            self.neutral_feature_mean = np.array(neutral_mean, dtype=float)
+        thresholds = data.get("thresholds", {})
+        self.confidence_gate = thresholds.get("gate", DEFAULT_GATE)
+        self.confidence_margin = thresholds.get("margin", DEFAULT_MARGIN)
         mean = classifier.get("scaler_mean")
         scale = classifier.get("scaler_scale")
         if mean is not None and scale is not None:
@@ -211,7 +238,13 @@ class EmotionRecognition:
     def _predict_classifier_model(self, vector):
         vector = self._scale_vector(vector)
         probs = self.classifier_model.predict_proba([vector])[0]
-        classes = getattr(self.classifier_model, "classes_", None) or self.classifier_model_classes or []
+        classes_attr = getattr(self.classifier_model, "classes_", None)
+        if classes_attr is not None:
+            classes = list(classes_attr)
+        elif self.classifier_model_classes:
+            classes = list(self.classifier_model_classes)
+        else:
+            classes = []
         if not classes:
             raise RuntimeError("Classifier-Klassen sind nicht definiert.")
         idx = int(np.argmax(probs))

@@ -21,13 +21,13 @@ from utils.settings import IMPORTANCE_TEST, REST_FACE_MODEL_PATH
 
 GROUP_SPECS: List[Tuple[str, int]] = [
     ("deepface", 7),
-    ("brow_raise", 2),
-    ("brow_lower", 2),
-    ("lid_aperture", 3),
-    ("cheek_raise", 3),
-    ("nose_flare", 2),
-    ("mouth_corner", 5),
-    ("mouth_depressor", 4),
+    ("brow_raise", 7),
+    ("brow_lower", 5),
+    ("lid_aperture", 7),
+    ("cheek_raise", 7),
+    ("nose_flare", 5),
+    ("mouth_corner", 8),
+    ("mouth_depressor", 7),
 ]
 
 
