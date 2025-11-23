@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+import math
 from typing import Optional, Sequence, Tuple
 
 import cv2
@@ -114,11 +115,7 @@ def _landmark_xy(landmark, width, height) -> Tuple[float, float]:
     return landmark.x * width, landmark.y * height
 
 
-def extract_facemesh_features(frame, bbox: Optional[Tuple[int, int, int, int]] = None) -> Optional[np.ndarray]:
-    """
-    Compute a small set of normalized facial-action features.
-    Returns None if no face mesh could be detected.
-    """
+def _extract_roi(frame, bbox: Optional[Tuple[int, int, int, int]]):
     if bbox:
         x, y, w, h = bbox
         x1 = max(0, x)
@@ -128,17 +125,30 @@ def extract_facemesh_features(frame, bbox: Optional[Tuple[int, int, int, int]] =
         roi = frame[y1:y2, x1:x2]
     else:
         roi = frame
+        x1 = y1 = 0
+    return roi, (x1, y1)
 
+
+def _process_facemesh(roi):
     if roi.size == 0:
         return None
-
     rgb = cv2.cvtColor(roi, cv2.COLOR_BGR2RGB)
     mesh = _get_facemesh()
     results = mesh.process(rgb)
     if not results.multi_face_landmarks:
         return None
+    return results.multi_face_landmarks[0]
 
-    face_landmarks = results.multi_face_landmarks[0]
+
+def extract_facemesh_features(frame, bbox: Optional[Tuple[int, int, int, int]] = None) -> Optional[np.ndarray]:
+    """
+    Compute a small set of normalized facial-action features.
+    Returns None if no face mesh could be detected.
+    """
+    roi, _ = _extract_roi(frame, bbox)
+    face_landmarks = _process_facemesh(roi)
+    if face_landmarks is None:
+        return None
     h, w, _ = roi.shape
 
     coords = {}
@@ -187,3 +197,23 @@ def _plot_au_points(roi, coords):
                 thickness=-1,
             )
     cv2.addWeighted(overlay, 0.4, roi, 0.6, 0, roi)
+
+
+def estimate_head_tilt(frame, bbox: Optional[Tuple[int, int, int, int]] = None) -> Optional[float]:
+    """Estimate head tilt angle in degrees (positive -> tilt to the right)."""
+    roi, _ = _extract_roi(frame, bbox)
+    face_landmarks = _process_facemesh(roi)
+    if face_landmarks is None:
+        return None
+    w = roi.shape[1] or 1.0
+    h = roi.shape[0] or 1.0
+    left = face_landmarks.landmark[FACIAL_LANDMARKS["LEFT_EYE_OUTER"]]
+    right = face_landmarks.landmark[FACIAL_LANDMARKS["RIGHT_EYE_OUTER"]]
+    x_left, y_left = left.x * w, left.y * h
+    x_right, y_right = right.x * w, right.y * h
+    dx = x_right - x_left
+    dy = y_right - y_left
+    if dx == 0:
+        return None
+    angle = math.degrees(math.atan2(dy, dx))
+    return angle

@@ -7,3 +7,7 @@ setup/samples
 scripts/Screenshot 2025-11-17 201909.png
 scripts/Screenshot 2025-11-17 200232.png
 scripts/Screenshot 2025-11-17 201550.png
+
+# Ignore generated rest-face models
+setup/rest_face_model.json
+setup/rest_face_model.profiles.snapshot.json
