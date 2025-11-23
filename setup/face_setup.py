@@ -122,6 +122,7 @@ class RestFaceCalibrator:
         abort_checker: Optional[Callable[[], bool]] = None
         selection_getter: Optional[Callable[[], Optional[str]]] = None
         start_checker: Optional[Callable[[], bool]] = None
+        frame_callback: Optional[Callable[[np.ndarray], None]] = None
         done_checker: Optional[Callable[[], bool]] = None
 
         if selection_mode and pending_order:
@@ -133,6 +134,7 @@ class RestFaceCalibrator:
                 abort_checker = selector_ui.is_aborted
                 selection_getter = selector_ui.take_selection
                 start_checker = selector_ui.consume_start_request
+                frame_callback = selector_ui.update_frame
                 done_checker = selector_ui.consume_done_request
             else:
                 selector_ui = None
@@ -165,6 +167,7 @@ class RestFaceCalibrator:
                         abort_checker=abort_checker,
                         selection_source=selection_getter,
                         start_checker=start_checker,
+                        frame_callback=frame_callback,
                     )
                     if override:
                         if override not in pending_map:
@@ -239,6 +242,7 @@ class RestFaceCalibrator:
         abort_checker: Optional[Callable[[], bool]] = None,
         selection_source: Optional[Callable[[], Optional[str]]] = None,
         start_checker: Optional[Callable[[], bool]] = None,
+        frame_callback: Optional[Callable[[np.ndarray], None]] = None,
     ):
         proceed, override = self._wait_for_start(
             cam,
@@ -248,6 +252,7 @@ class RestFaceCalibrator:
             abort_checker=abort_checker,
             selection_source=selection_source,
             start_checker=start_checker,
+            frame_callback=frame_callback,
         )
         if override:
             return None, override
@@ -295,9 +300,14 @@ class RestFaceCalibrator:
                     (0, 0, 255),
                     2,
                 )
-            cv2.imshow(CAMERA_WINDOW_NAME, frame)
+            if frame_callback:
+                frame_callback(frame)
+                key = -1
+            else:
+                cv2.imshow(CAMERA_WINDOW_NAME, frame)
+                key = cv2.waitKey(1) & 0xFF
 
-            if cv2.waitKey(1) & 0xFF == 27:
+            if key == 27:
                 print("⏹ Cancelled.")
                 return None, None
             if event_pump:
@@ -617,6 +627,7 @@ class RestFaceCalibrator:
         abort_checker: Optional[Callable[[], bool]] = None,
         selection_source: Optional[Callable[[], Optional[str]]] = None,
         start_checker: Optional[Callable[[], bool]] = None,
+        frame_callback: Optional[Callable[[np.ndarray], None]] = None,
     ) -> tuple[bool, Optional[str]]:
         """Show live preview and wait for ENTER/SPACE to start, ESC/Q to abort."""
         print(f"\nEmotion '{emotion}': {instruction}")
@@ -652,8 +663,12 @@ class RestFaceCalibrator:
                     (0, 0, 255),
                     2,
                 )
-            cv2.imshow(CAMERA_WINDOW_NAME, overlay)
-            key = cv2.waitKey(1) & 0xFF
+            if frame_callback:
+                frame_callback(overlay)
+                key = -1
+            else:
+                cv2.imshow(CAMERA_WINDOW_NAME, overlay)
+                key = cv2.waitKey(1) & 0xFF
             if event_pump:
                 event_pump()
             if abort_checker and abort_checker():
