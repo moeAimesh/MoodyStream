@@ -29,14 +29,15 @@ if str(PROJECT_ROOT) not in sys.path:
 from detection.face_detection import detect_faces
 from detection.preprocessing import preprocess_face
 from detection.facemesh_features import extract_facemesh_features
+from setup.capture_feedback import analyze_capture_feedback
 from utils.settings import REST_FACE_MODEL_PATH, TRAINED_MODEL
 
 EMOTION_PROFILES: List[Tuple[str, str]] = [
-    ("fear", "Bitte ?ngstlich erstaunt schauen (Augen aufrei?en, Mund leicht ge?ffnet)."),
-    ("happy", "Bitte lachen / fr?hlich schauen (breites L?cheln)."),
-    ("sad", "Bitte traurig oder betr?bt schauen (Mundwinkel nach unten, Blick senken)."),
-    ("surprise", "Bitte ?berrascht schauen (Augenbrauen hoch, Mund zu einem 'O')."),
-    ("neutral", "Bitte entspannt / neutral schauen."),
+    ("fear", "Look scared or startled (open eyes wide, mouth slightly open)."),
+    ("happy", "Laugh or smile broadly as if you just heard a joke."),
+    ("sad", "Look disappointed or sad (mouth corners down, gaze lowered)."),
+    ("surprise", "Look surprised with raised brows and a rounded mouth."),
+    ("neutral", "Relax your face and look how you normally do at rest."),
 ]
 
 CAMERA_WINDOW_NAME = "Emotion Profiling"
@@ -93,11 +94,11 @@ class RestFaceCalibrator:
             print(f"⚠️ {exc}")
             return False
         if not targets:
-            print("⚠️ Keine Emotionen ausgewählt.")
+            print("⚠️ No emotions selected.")
             return False
 
         if not self._show_preflight_instructions():
-            print("✖️ Setup abgebrochen (Hinweise nicht bestätigt).")
+            print("✖️ Setup cancelled (instructions not confirmed).")
             return False
 
         cam = cv2.VideoCapture(0)
@@ -141,7 +142,7 @@ class RestFaceCalibrator:
                 if selector_ui is not None and qt_app is not None:
                     selected = self._wait_for_gui_selection(qt_app, selector_ui, pending_map)
                     if selected is None:
-                        print("✖️ Emotion-Auswahlfenster geschlossen – Setup abgebrochen.")
+                        print("✖️ Emotion selector closed – cancelling setup.")
                         return False
                     emotion = selected
                 else:
@@ -167,7 +168,7 @@ class RestFaceCalibrator:
                     )
                     if override:
                         if override not in pending_map:
-                            print(f"⚠️ Auswahl '{override}' unbekannt – ignoriere.")
+                            print(f"⚠️ Selection '{override}' unknown – ignoring.")
                             continue
                         emotion = override
                         instruction = pending_map[emotion]
@@ -198,10 +199,10 @@ class RestFaceCalibrator:
         self.neutral_feature_mean = self._compute_neutral_feature_mean()
         self._save_snapshot()
         if emotions is None:
-            print("�o. Alle Emotionen erfolgreich erfasst.")
+            print("✅ All emotions recorded successfully.")
         else:
             joined = ", ".join(e for e, _ in targets)
-            print(f"✅ Emotion(en) aktualisiert: {joined}")
+            print(f"✅ Updated emotions: {joined}")
         return True
 
     def record_single_emotion(self, emotion: str, duration: int = 10, analyze_every: int = 5) -> bool:
@@ -251,7 +252,7 @@ class RestFaceCalibrator:
         if override:
             return None, override
         if not proceed:
-            print("?? Abgebrochen durch Nutzer.")
+            print("⏹ Cancelled by user.")
             return None, None
 
         vectors = []
@@ -259,7 +260,7 @@ class RestFaceCalibrator:
         sample_crops = []
         frame_count = 0
         start = time.time()
-        print(f"\n�Y\"� Profil '{emotion}' – Aufnahme gestartet")
+        print(f"\n🎬 Recording emotion '{emotion}' ...")
 
         while time.time() - start < duration:
             ret, frame = cam.read()
@@ -267,41 +268,55 @@ class RestFaceCalibrator:
                 continue
 
             boxes = detect_faces(frame)
-            if boxes:
-                x, y, w, h = boxes[0]
+            bbox = boxes[0] if boxes else None
+            if bbox:
+                x, y, w, h = bbox
                 cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
 
             cv2.putText(
                 frame,
-                f"Profil: {emotion}",
+                f"Emotion: {emotion}",
                 (40, 50),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 1,
                 (0, 255, 255),
                 2,
             )
+
+            feedback_messages = analyze_capture_feedback(frame, bbox)
+            for idx, message in enumerate(feedback_messages):
+                y_offset = frame.shape[0] - 20 - idx * 25
+                cv2.putText(
+                    frame,
+                    message,
+                    (20, max(60, y_offset)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    (0, 0, 255),
+                    2,
+                )
             cv2.imshow(CAMERA_WINDOW_NAME, frame)
 
             if cv2.waitKey(1) & 0xFF == 27:
-                print("�?O Abgebrochen")
+                print("⏹ Cancelled.")
                 return None, None
             if event_pump:
                 event_pump()
             if abort_checker and abort_checker():
-                print("✖️ Aufnahme über GUI abgebrochen.")
+                print("✖️ Capture aborted via GUI.")
                 return None, None
             if selection_source:
                 new_choice = selection_source()
                 if new_choice and new_choice != emotion:
-                    print(f"↪️ Wechsel zu Emotion '{new_choice}'.")
+                    print(f"↪️ Switching to emotion '{new_choice}'.")
                     return None, new_choice
 
-            if frame_count % analyze_every == 0 and boxes:
-                processed = preprocess_face(frame, boxes[0])
+            if frame_count % analyze_every == 0 and bbox:
+                processed = preprocess_face(frame, bbox)
                 if processed is None:
                     frame_count += 1
                     continue
-                features = extract_facemesh_features(frame, boxes[0])
+                features = extract_facemesh_features(frame, bbox)
                 if features is None:
                     frame_count += 1
                     continue
@@ -317,14 +332,14 @@ class RestFaceCalibrator:
                     feature_vectors.append(features)
                     if len(sample_crops) < 3:
                         sample_crops.append(processed)
-                    print(f"�YY� {emotion}: Sample {len(vectors)}")
+                    print(f"✅ {emotion}: captured sample {len(vectors)}")
                 except Exception as exc:
-                    print("�s���? Analysefehler:", exc)
+                    print("⚠️ Analysis error:", exc)
 
             frame_count += 1
 
         if len(vectors) < 3:
-            print(f"�s���? Zu wenige Samples für {emotion}. Bitte erneut versuchen.")
+            print(f"⚠️ Too few samples for {emotion}. Please try again.")
             return None, None
 
         return (
@@ -368,7 +383,7 @@ class RestFaceCalibrator:
             return
         if selector.consume_done_request():
             return
-        print("✅ Alle Emotionen erfasst. Bitte 'Done' klicken, um fortzufahren.")
+        print("✅ All emotions captured. Press 'Done' to continue.")
         while True:
             if selector.consume_done_request():
                 break
@@ -383,10 +398,10 @@ class RestFaceCalibrator:
         try:
             from gui.setup import show_setup_instructions
         except Exception:
-            print("📋 Bitte beachte vor dem Setup:")
+            print("📋 Please review before starting:")
             for idx, line in enumerate(PRE_FLIGHT_INSTRUCTIONS, start=1):
                 print(f"  {idx}. {line}")
-            answer = input("Tippe 'ok' zum Fortfahren oder 'q' zum Abbrechen: ").strip().lower()
+            answer = input("Type 'ok' to continue or 'q' to cancel: ").strip().lower()
             return answer in {"ok", "okay", "yes", "y", ""}
         return show_setup_instructions(PRE_FLIGHT_INSTRUCTIONS)
 
@@ -411,13 +426,13 @@ class RestFaceCalibrator:
             X = np.array(neutral_vectors)
             self.neutral_nn = NearestNeighbors(n_neighbors=1, metric="cosine")
             self.neutral_nn.fit(X)
-            print("✅✅ Neutral-Modell trainiert.")
+            print("✅ Neutral model trained.")
         else:
-            print("⚠️⚠️ Neutral-Profil zu klein – überspringe NN-Training.")
+            print("⚠️ Neutral profile too small – skipping NN training.")
 
         clf_dataset = self._prepare_classifier_dataset()
         if clf_dataset is None:
-            print("⚠️⚠️ Zu wenige Daten für Klassifikator.")
+            print("⚠️ Not enough data for classifier.")
         else:
             X_balanced, y_balanced, feature_len = clf_dataset
             scaler = StandardScaler()
@@ -428,7 +443,7 @@ class RestFaceCalibrator:
                 clf, model_type, feature_len, scaler
             )
             self.classifier_model_type = model_type
-            print("✅ Personalisierter Klassifikator trainiert.")
+            print("✅ Personalized classifier trained.")
         # Dynamic thresholds from neutral noise
         self._compute_thresholds_from_neutral()
         return True
@@ -437,7 +452,7 @@ class RestFaceCalibrator:
         Speichert pro Emotion Mittelwerte, Distanzen und Beispielbilder.
         """
         if not self.profiles:
-            print("�s���? Keine Daten zum Speichern.")
+            print("⚠️ No data to save.")
             return
 
         model_data = {"profiles": {}}
@@ -464,7 +479,7 @@ class RestFaceCalibrator:
         with self.model_path.open("w", encoding="utf-8") as f:
             json.dump(model_data, f, indent=2)
 
-        print(f"�Y'� Profil gespeichert unter: {self.model_path}")
+        print(f"✅ Profile saved to: {self.model_path}")
 
     def visualize_space(self):
         """
@@ -485,7 +500,7 @@ class RestFaceCalibrator:
             plt.title("Emotion Embedding Space (2D PCA)")
             plt.show()
         except Exception as exc:
-            print("�s���? Visualisierung fehlgeschlagen:", exc)
+            print("⚠️ Visualization failed:", exc)
 
     def _compute_stats(self, vectors):
         vectors_np = np.array(vectors)
@@ -555,7 +570,7 @@ class RestFaceCalibrator:
 
     def _warmup_session(self, cam, seconds: float = 2.0, show_preview: bool = True):
         """Read a few frames and run dummy DeepFace/FaceMesh to avoid cold-start drops."""
-        print("Warm-up: initialisiere Kamera/Modelle ... (Vorschau aktiv)")
+        print("Warm-up: initializing camera/models ... (preview active)")
         start = time.time()
         deepface_ran = False
         while time.time() - start < seconds:
@@ -591,7 +606,7 @@ class RestFaceCalibrator:
                             deepface_ran = True
                         except Exception:
                             pass
-        print("Warm-up abgeschlossen. Starte Aufnahme ...")
+        print("Warm-up complete. Starting capture ...")
 
     def _wait_for_start(
         self,
@@ -604,13 +619,39 @@ class RestFaceCalibrator:
         start_checker: Optional[Callable[[], bool]] = None,
     ) -> tuple[bool, Optional[str]]:
         """Show live preview and wait for ENTER/SPACE to start, ESC/Q to abort."""
-        print(f"\nProfil '{emotion}': {instruction}")
-        print("Drücke ENTER/SPACE zum Starten, ESC oder q zum Abbrechen.")
+        print(f"\nEmotion '{emotion}': {instruction}")
+        print("Press ENTER/SPACE to start, ESC or Q to cancel.")
         while True:
             ret, frame = cam.read()
             if not ret:
                 continue
+            boxes = detect_faces(frame)
+            bbox = boxes[0] if boxes else None
             overlay = frame.copy()
+            if bbox:
+                x, y, w, h = bbox
+                cv2.rectangle(overlay, (x, y), (x + w, y + h), (0, 255, 0), 2)
+            cv2.putText(
+                overlay,
+                f"Emotion: {emotion} (use Start/Stop buttons)",
+                (20, 30),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (0, 255, 255),
+                2,
+            )
+            feedback_messages = analyze_capture_feedback(overlay, bbox)
+            for idx, message in enumerate(feedback_messages):
+                y_offset = overlay.shape[0] - 20 - idx * 25
+                cv2.putText(
+                    overlay,
+                    message,
+                    (20, max(60, y_offset)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    (0, 0, 255),
+                    2,
+                )
             cv2.imshow(CAMERA_WINDOW_NAME, overlay)
             key = cv2.waitKey(1) & 0xFF
             if event_pump:
@@ -688,7 +729,7 @@ class RestFaceCalibrator:
         elif name == "lightgbm":
             if LGBMClassifier is None:
                 raise RuntimeError(
-                    "LightGBM ist nicht installiert. Bitte `pip install lightgbm` ausführen oder TRAINED_MODEL ändern."
+                    "LightGBM is not installed. Please `pip install lightgbm` or change TRAINED_MODEL."
                 )
             clf = LGBMClassifier(
                 objective="multiclass",
@@ -737,17 +778,17 @@ class RestFaceCalibrator:
         self.snapshot_path.parent.mkdir(parents=True, exist_ok=True)
         with self.snapshot_path.open("w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
-        print(f"?? Emotion-Snapshot gespeichert unter: {self.snapshot_path}")
+        print(f"✅ Emotion snapshot saved to: {self.snapshot_path}")
 
     def load_snapshot(self):
         if not self.snapshot_path.exists():
-            print("?? Kein gespeicherter Emotion-Snapshot gefunden.")
+            print("⚠️ No stored emotion snapshot found.")
             return False
         with self.snapshot_path.open("r", encoding="utf-8") as f:
             data = json.load(f)
         profiles = data.get("profiles")
         if not profiles:
-            print("?? Snapshot leer oder ung?ltig.")
+            print("⚠️ Snapshot empty or invalid.")
             return False
         self.profiles = {}
         for emotion, payload in profiles.items():
@@ -763,40 +804,41 @@ class RestFaceCalibrator:
             self.neutral_feature_mean = np.array(neutral_mean, dtype=float)
         else:
             self.neutral_feature_mean = self._compute_neutral_feature_mean()
-        print(f"?? Emotion-Snapshot geladen ({self.snapshot_path})")
+        print(f"✅ Emotion snapshot loaded ({self.snapshot_path})")
         return True
+
 
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Rest-Face Kalibrierung für Moody.")
+    parser = argparse.ArgumentParser(description="Rest-face calibration for Moody.")
     parser.add_argument(
         "-e",
         "--emotion",
         action="append",
-        help="Name einer Emotion (z. B. happy). Mehrfach nutzbar, um mehrere gezielt aufzunehmen.",
+        help="Name of an emotion (e.g., happy). Use multiple times to capture specific ones.",
     )
     parser.add_argument(
         "--list-emotions",
         action="store_true",
-        help="Zeigt alle verfügbaren Emotionen samt Anleitung.",
+        help="Show all available emotions with their instructions.",
     )
     parser.add_argument(
         "--duration",
         type=int,
         default=12,
-        help="Aufnahmedauer pro Emotion (Sekunden). Standard: 12",
+        help="Capture duration per emotion in seconds. Default: 12",
     )
     parser.add_argument(
         "--analyze-every",
         type=int,
         default=5,
-        help="Frame-Schrittweite für die Analyse. Standard: 5",
+        help="Analyze every Nth frame. Default: 5",
     )
     args = parser.parse_args()
 
     if args.list_emotions:
-        print("Verfügbare Emotionen:")
+        print("Available emotions:")
         for emotion, instruction in EMOTION_PROFILES:
             print(f" - {emotion}: {instruction}")
         raise SystemExit(0)

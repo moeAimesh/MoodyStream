@@ -28,7 +28,7 @@ class EmotionSelectorWindow(QtWidgets.QWidget):
 
     def __init__(self, emotions: Iterable[str], position: Optional[tuple[int, int]] = None):
         super().__init__()
-        self.setWindowTitle("Moody – Emotion auswählen")
+        self.setWindowTitle("Moody – Emotion Selector")
         self.setFixedWidth(360)
         self.setMinimumHeight(480)
         self.setWindowFlag(QtCore.Qt.WindowStaysOnTopHint, True)
@@ -43,7 +43,7 @@ class EmotionSelectorWindow(QtWidgets.QWidget):
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(10)
 
-        self.info_label = QtWidgets.QLabel("Wähle die nächste Emotion.")
+        self.info_label = QtWidgets.QLabel("Choose the next emotion.")
         self.info_label.setWordWrap(True)
         layout.addWidget(self.info_label)
 
@@ -62,7 +62,7 @@ class EmotionSelectorWindow(QtWidgets.QWidget):
                 row += 1
         layout.addLayout(grid)
 
-        self.status_label = QtWidgets.QLabel("Keine Auswahl getroffen.")
+        self.status_label = QtWidgets.QLabel("No selection yet.")
         layout.addWidget(self.status_label)
 
         if position:
@@ -79,7 +79,7 @@ class EmotionSelectorWindow(QtWidgets.QWidget):
         button_row.setSpacing(10)
         self.start_button = QtWidgets.QPushButton("Start")
         self.start_button.clicked.connect(self._handle_start_clicked)
-        self.abort_button = QtWidgets.QPushButton("Beenden")
+        self.abort_button = QtWidgets.QPushButton("Stop")
         self.abort_button.clicked.connect(self._handle_abort_clicked)
         self.done_button = QtWidgets.QPushButton("Done")
         self.done_button.setEnabled(False)
@@ -98,7 +98,7 @@ class EmotionSelectorWindow(QtWidgets.QWidget):
     def _handle_selection(self, emotion: str):
         if self._buttons.get(emotion) and self._buttons[emotion].isEnabled():
             self._pending_selection = emotion
-            self.status_label.setText(f"Auswahl: {emotion.title()} (bereit)")
+            self.status_label.setText(f"Selected: {emotion.title()} (ready)")
             self._update_instruction(emotion)
 
     def set_active_emotion(self, emotion: Optional[str]):
@@ -110,7 +110,7 @@ class EmotionSelectorWindow(QtWidgets.QWidget):
         self._active_emotion = emotion
         if emotion and emotion in self._buttons:
             self._buttons[emotion].setStyleSheet("background-color: #ffd966;")
-            self.status_label.setText(f"Aufnahme läuft: {emotion.title()}")
+            self.status_label.setText(f"Recording: {emotion.title()}")
             self._update_instruction(emotion)
         else:
             self._update_instruction(None)
@@ -122,7 +122,7 @@ class EmotionSelectorWindow(QtWidgets.QWidget):
             btn.setEnabled(False)
             btn.setStyleSheet("background-color: #c6efce;")
             btn.setText(f"{emotion.title()} ✓")
-        self.status_label.setText(f"{emotion.title()} abgeschlossen.")
+        self.status_label.setText(f"{emotion.title()} completed.")
         if self._active_emotion == emotion:
             self._active_emotion = None
         if self.remaining_emotions() == 0:
@@ -176,7 +176,7 @@ class SetupInstructionDialog(QtWidgets.QDialog):
 
     def __init__(self, instructions: Sequence[str]):
         super().__init__()
-        self.setWindowTitle("Moody – Setup Hinweise")
+        self.setWindowTitle("Moody – Setup Instructions")
         self.setWindowFlag(QtCore.Qt.WindowStaysOnTopHint, True)
         self.setMinimumWidth(420)
 
