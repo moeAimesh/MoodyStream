@@ -38,6 +38,22 @@ EMOTION_PROFILES: List[Tuple[str, str]] = [
     ("surprise", "Bitte ?berrascht schauen (Augenbrauen hoch, Mund zu einem 'O')."),
     ("neutral", "Bitte entspannt / neutral schauen."),
 ]
+
+CAMERA_WINDOW_NAME = "Emotion Profiling"
+CAMERA_WINDOW_POSITION = (80, 80)
+CAMERA_WINDOW_SIZE = (640, 480)
+SELECTOR_WINDOW_POSITION = (
+    CAMERA_WINDOW_POSITION[0] + CAMERA_WINDOW_SIZE[0] + 40,
+    CAMERA_WINDOW_POSITION[1],
+)
+PRE_FLIGHT_INSTRUCTIONS = [
+    "Keep the camera at eye level.",
+    "Avoid top-down lighting so your face has no harsh shadows.",
+    "Do not laugh or perform other emotions than the prompted one during the setup.",
+    "Act the emotions exactly as you expect them to trigger sounds later while streaming.",
+    "Exaggerate the emotions so the AI only reacts when you are really shocked/sad/happy/etc.",
+]
+
 class RestFaceCalibrator:
     """
     Kalibriert mehrere Emotionen des Nutzers.
@@ -80,11 +96,16 @@ class RestFaceCalibrator:
             print("⚠️ Keine Emotionen ausgewählt.")
             return False
 
+        if not self._show_preflight_instructions():
+            print("✖️ Setup abgebrochen (Hinweise nicht bestätigt).")
+            return False
+
         cam = cv2.VideoCapture(0)
         cam.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         cam.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
         # Warm-up: Modelle/Kamera initialisieren, bevor Samples gezählt werden.
+        self._prepare_camera_window()
         self._warmup_session(cam)
 
         selection_mode = emotions is None
@@ -98,12 +119,20 @@ class RestFaceCalibrator:
         selector_ui = None
         event_pump: Optional[Callable[[], None]] = None
         abort_checker: Optional[Callable[[], bool]] = None
+        selection_getter: Optional[Callable[[], Optional[str]]] = None
+        start_checker: Optional[Callable[[], bool]] = None
+        done_checker: Optional[Callable[[], bool]] = None
 
         if selection_mode and pending_order:
-            qt_app, selector_ui = self._init_emotion_selector(pending_order)
+            qt_app, selector_ui = self._init_emotion_selector(
+                pending_order, position=SELECTOR_WINDOW_POSITION
+            )
             if selector_ui is not None and qt_app is not None:
                 event_pump = lambda: qt_app.processEvents()
                 abort_checker = selector_ui.is_aborted
+                selection_getter = selector_ui.take_selection
+                start_checker = selector_ui.consume_start_request
+                done_checker = selector_ui.consume_done_request
             else:
                 selector_ui = None
 
@@ -123,21 +152,41 @@ class RestFaceCalibrator:
                 if selector_ui is not None:
                     selector_ui.set_active_emotion(emotion)
 
-                payload = self._capture_emotion_session(
-                    cam,
-                    emotion,
-                    instruction,
-                    duration=duration,
-                    analyze_every=analyze_every,
-                    event_pump=event_pump,
-                    abort_checker=abort_checker,
-                )
-                if payload is None:
-                    return False
-                self.profiles[emotion] = payload
-                del pending_map[emotion]
-                if selector_ui is not None:
-                    selector_ui.mark_completed(emotion)
+                done_triggered = False
+                while True:
+                    payload, override = self._capture_emotion_session(
+                        cam,
+                        emotion,
+                        instruction,
+                        duration=duration,
+                        analyze_every=analyze_every,
+                        event_pump=event_pump,
+                        abort_checker=abort_checker,
+                        selection_source=selection_getter,
+                        start_checker=start_checker,
+                    )
+                    if override:
+                        if override not in pending_map:
+                            print(f"⚠️ Auswahl '{override}' unbekannt – ignoriere.")
+                            continue
+                        emotion = override
+                        instruction = pending_map[emotion]
+                        if selector_ui is not None:
+                            selector_ui.set_active_emotion(emotion)
+                        continue
+                    if payload is None:
+                        return False
+                    self.profiles[emotion] = payload
+                    del pending_map[emotion]
+                    if selector_ui is not None:
+                        selector_ui.mark_completed(emotion)
+                        if done_checker and done_checker():
+                            done_triggered = True
+                    break
+                if done_triggered:
+                    break
+            if selection_mode and selector_ui is not None and not pending_map:
+                self._wait_for_done_confirmation(qt_app, selector_ui)
         finally:
             cam.release()
             cv2.destroyAllWindows()
@@ -187,16 +236,23 @@ class RestFaceCalibrator:
         analyze_every: int,
         event_pump: Optional[Callable[[], None]] = None,
         abort_checker: Optional[Callable[[], bool]] = None,
+        selection_source: Optional[Callable[[], Optional[str]]] = None,
+        start_checker: Optional[Callable[[], bool]] = None,
     ):
-        if not self._wait_for_start(
+        proceed, override = self._wait_for_start(
             cam,
             emotion,
             instruction,
             event_pump=event_pump,
             abort_checker=abort_checker,
-        ):
+            selection_source=selection_source,
+            start_checker=start_checker,
+        )
+        if override:
+            return None, override
+        if not proceed:
             print("?? Abgebrochen durch Nutzer.")
-            return None
+            return None, None
 
         vectors = []
         feature_vectors = []
@@ -224,16 +280,21 @@ class RestFaceCalibrator:
                 (0, 255, 255),
                 2,
             )
-            cv2.imshow("Emotion Profiling", frame)
+            cv2.imshow(CAMERA_WINDOW_NAME, frame)
 
             if cv2.waitKey(1) & 0xFF == 27:
                 print("�?O Abgebrochen")
-                return None
+                return None, None
             if event_pump:
                 event_pump()
             if abort_checker and abort_checker():
                 print("✖️ Aufnahme über GUI abgebrochen.")
-                return None
+                return None, None
+            if selection_source:
+                new_choice = selection_source()
+                if new_choice and new_choice != emotion:
+                    print(f"↪️ Wechsel zu Emotion '{new_choice}'.")
+                    return None, new_choice
 
             if frame_count % analyze_every == 0 and boxes:
                 processed = preprocess_face(frame, boxes[0])
@@ -264,23 +325,28 @@ class RestFaceCalibrator:
 
         if len(vectors) < 3:
             print(f"�s���? Zu wenige Samples für {emotion}. Bitte erneut versuchen.")
-            return None
+            return None, None
 
-        return {
-            "vectors": vectors,
-            "features": feature_vectors,
-            "samples": sample_crops,
-        }
+        return (
+            {
+                "vectors": vectors,
+                "features": feature_vectors,
+                "samples": sample_crops,
+            },
+            None,
+        )
 
-    def _init_emotion_selector(self, emotions: Sequence[str]):
+    def _init_emotion_selector(
+        self, emotions: Sequence[str], position: Optional[tuple[int, int]] = None
+    ):
         """Initialisiere PyQt-Selector, falls verfügbar."""
         try:
-            from gui.components.emotion_selector import EmotionSelectorWindow, ensure_qt_app
+            from gui.setup import EmotionSelectorWindow, ensure_qt_app
         except Exception as exc:  # pragma: no cover - GUI optional
             print(f"⚠️ Emotion-Selector GUI konnte nicht geladen werden ({exc}).")
             return None, None
         app = ensure_qt_app()
-        window = EmotionSelectorWindow(emotions)
+        window = EmotionSelectorWindow(emotions, position=position)
         window.show()
         return app, window
 
@@ -295,6 +361,46 @@ class RestFaceCalibrator:
             if choice and choice in valid_emotions:
                 return choice
             time.sleep(0.05)
+
+    def _wait_for_done_confirmation(self, qt_app, selector):
+        """Warte darauf, dass der Nutzer den Done-Button klickt oder das Fenster schließt."""
+        if selector.remaining_emotions() > 0:
+            return
+        if selector.consume_done_request():
+            return
+        print("✅ Alle Emotionen erfasst. Bitte 'Done' klicken, um fortzufahren.")
+        while True:
+            if selector.consume_done_request():
+                break
+            if selector.is_aborted():
+                break
+            if qt_app:
+                qt_app.processEvents()
+            time.sleep(0.05)
+
+    def _show_preflight_instructions(self) -> bool:
+        """Zeigt ein Hinweis-Popup (PyQt) oder CLI-Fallback an."""
+        try:
+            from gui.setup import show_setup_instructions
+        except Exception:
+            print("📋 Bitte beachte vor dem Setup:")
+            for idx, line in enumerate(PRE_FLIGHT_INSTRUCTIONS, start=1):
+                print(f"  {idx}. {line}")
+            answer = input("Tippe 'ok' zum Fortfahren oder 'q' zum Abbrechen: ").strip().lower()
+            return answer in {"ok", "okay", "yes", "y", ""}
+        return show_setup_instructions(PRE_FLIGHT_INSTRUCTIONS)
+
+    def _prepare_camera_window(self):
+        """Ensure the OpenCV preview window appears at a fixed position."""
+        if getattr(self, "_camera_window_ready", False):
+            return
+        try:
+            cv2.namedWindow(CAMERA_WINDOW_NAME, cv2.WINDOW_NORMAL)
+            cv2.moveWindow(CAMERA_WINDOW_NAME, *CAMERA_WINDOW_POSITION)
+            cv2.resizeWindow(CAMERA_WINDOW_NAME, *CAMERA_WINDOW_SIZE)
+        except Exception:
+            pass
+        self._camera_window_ready = True
 
     def train(self):
         """
@@ -466,7 +572,7 @@ class RestFaceCalibrator:
                     (0, 255, 255),
                     2,
                 )
-                cv2.imshow("Emotion Profiling", frame)
+                cv2.imshow(CAMERA_WINDOW_NAME, frame)
                 if cv2.waitKey(1) & 0xFF == 27:  # ESC to abort warm-up
                     break
             boxes = detect_faces(frame)
@@ -494,7 +600,9 @@ class RestFaceCalibrator:
         instruction: str,
         event_pump: Optional[Callable[[], None]] = None,
         abort_checker: Optional[Callable[[], bool]] = None,
-    ) -> bool:
+        selection_source: Optional[Callable[[], Optional[str]]] = None,
+        start_checker: Optional[Callable[[], bool]] = None,
+    ) -> tuple[bool, Optional[str]]:
         """Show live preview and wait for ENTER/SPACE to start, ESC/Q to abort."""
         print(f"\nProfil '{emotion}': {instruction}")
         print("Drücke ENTER/SPACE zum Starten, ESC oder q zum Abbrechen.")
@@ -503,25 +611,22 @@ class RestFaceCalibrator:
             if not ret:
                 continue
             overlay = frame.copy()
-            cv2.putText(
-                overlay,
-                f"Profil: {emotion} (ENTER/SPACE starten, ESC/q abbrechen)",
-                (20, 30),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,
-                (0, 255, 255),
-                2,
-            )
-            cv2.imshow("Emotion Profiling", overlay)
+            cv2.imshow(CAMERA_WINDOW_NAME, overlay)
             key = cv2.waitKey(1) & 0xFF
             if event_pump:
                 event_pump()
             if abort_checker and abort_checker():
-                return False
+                return False, None
+            if selection_source:
+                new_choice = selection_source()
+                if new_choice and new_choice != emotion:
+                    return False, new_choice
+            if start_checker and start_checker():
+                return True, None
             if key in {13, 10, 32}:  # Enter/Return or Space
-                return True
+                return True, None
             if key in {27, ord("q"), ord("Q")}:
-                return False
+                return False, None
 
     def _prepare_classifier_dataset(self):
         # collect all embeddings and labels
