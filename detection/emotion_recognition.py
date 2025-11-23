@@ -23,10 +23,11 @@ from utils.settings import (
     HEURISTIC_DEBUG_INTERVAL,
 )
 
-CLASSIFIER_CONFIDENCE = 0.55
-EXTREME_LABELS = {"fear", "sad", "surprise"}
-DEFAULT_GATE = 0.60
-DEFAULT_MARGIN = 0.08
+CLASSIFIER_CONFIDENCE = 0.5
+DEFAULT_GATE = 0.40
+DEFAULT_MARGIN = 0.02
+STATE_TTL_SECONDS = 600  # purge per-track state after N seconds of inactivity
+STATE_PURGE_INTERVAL = 60  # throttle how often we scan for stale tracks
 
 
 class EmotionRecognition:
@@ -68,6 +69,8 @@ class EmotionRecognition:
         self.neutral_feature_mean = None
         self.confidence_gate = DEFAULT_GATE
         self.confidence_margin = DEFAULT_MARGIN
+        self.state_ttl = STATE_TTL_SECONDS
+        self._last_purge = 0.0
         self.heuristics = EmotionHeuristicScorer(
             debug=HEURISTIC_DEBUG,
             debug_interval=HEURISTIC_DEBUG_INTERVAL,
@@ -79,6 +82,7 @@ class EmotionRecognition:
         """Analyze a frame for a given track (default context if None)."""
         key = track_id if track_id is not None else "_default"
         now = time.time()
+        self._purge_stale_states(now)
 
         if now - self.last_analysis[key] < self.interval:
             return self.stable_emotion.get(key)
@@ -130,12 +134,15 @@ class EmotionRecognition:
                 top2 = np.partition(classifier_probs, -2)[-2:]
                 idx = int(np.argmax(classifier_probs))
                 confidence = float(classifier_probs[idx])
-                candidate = self.emotion_classes[idx] if confidence >= CLASSIFIER_CONFIDENCE else None
-                if candidate in EXTREME_LABELS:
-                    margin = confidence - float(top2[0] if classifier_probs.size > 1 else 0.0)
-                    if confidence < self.confidence_gate or margin < self.confidence_margin:
-                        candidate = None
-                        classifier_probs = None
+                margin = confidence - float(top2[0] if classifier_probs.size > 1 else 0.0)
+                required_gate = max(CLASSIFIER_CONFIDENCE, self.confidence_gate)
+                required_margin = self.confidence_margin
+                candidate = None
+                # Einheitliche Confidence-Policy: Gate + Margin für alle Klassen
+                if confidence >= required_gate and margin >= required_margin:
+                    candidate = self.emotion_classes[idx]
+                else:
+                    classifier_probs = None
                 if candidate and feature_vec_raw is not None:
                     if not self.heuristics.validate(candidate, feature_vec_raw):
                         candidate = None
@@ -358,3 +365,24 @@ class EmotionRecognition:
             state["count"] = 0
             return candidate
         return current
+
+    def _purge_stale_states(self, now: float):
+        """Drop per-track state that has been inactive longer than TTL."""
+        if self.state_ttl is None or self.state_ttl <= 0:
+            return
+        if now - self._last_purge < STATE_PURGE_INTERVAL:
+            return
+        cutoff = now - self.state_ttl
+        for key, ts in list(self.last_analysis.items()):
+            if key == "_default" or ts >= cutoff:
+                continue
+            self.drop_track_state(key)
+        self._last_purge = now
+
+    def drop_track_state(self, track_id: Optional[int] = None):
+        """Explicitly remove cached state for a track (used when a track is dropped)."""
+        key = track_id if track_id is not None else "_default"
+        self.last_analysis.pop(key, None)
+        self.stable_emotion.pop(key, None)
+        self.switch_state.pop(key, None)
+        self.filters.pop(key, None)
