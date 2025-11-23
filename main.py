@@ -36,7 +36,7 @@ def main():
     print("\n✅ Setup abgeschlossen! Starte Hauptprogramm...\n")
 
     # Starte Kameraerkennung
-    start_detection()
+    start_detection(virtual_cam=True)
 
 
 if __name__ == "__main__":
