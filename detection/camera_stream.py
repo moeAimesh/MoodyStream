@@ -78,7 +78,7 @@ def visualise_avg_fps():
 
 
 def start_detection(
-    camera_index: int = 2,
+    camera_index: int = 0,
     *,
     show_window: bool = True,
     window_name: str = "MOODY Detection",
