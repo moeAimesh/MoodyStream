@@ -12,7 +12,10 @@ from utils.settings import (
     MIN_FACE_AREA_RATIO,
     MOTION_HOLD_FRAMES,
     MOTION_MAX_RATIO,
+    TALKING_THRESHOLD_DEFAULT,
+    TALKING_WINDOW,
 )
+from collections import deque
 
 
 BLOCK_SPECS = [
@@ -31,6 +34,7 @@ class _TrackState:
     center: Tuple[float, float] | None = None
     diag: float | None = None
     cooldown: int = 0
+    mouth_history: deque = field(default_factory=lambda: deque(maxlen=TALKING_WINDOW))
 
 
 @dataclass
@@ -41,6 +45,7 @@ class DetectionRules:
     motion_cooldown: int = MOTION_HOLD_FRAMES
     min_face_ratio: float = MIN_FACE_AREA_RATIO
     eye_threshold: float = MIN_EYE_VISIBILITY
+    talking_threshold: float = TALKING_THRESHOLD_DEFAULT
     _track_state: Dict[int, _TrackState] = field(default_factory=dict)
 
     def __post_init__(self):
@@ -66,6 +71,8 @@ class DetectionRules:
             return "face_moving"
         if not self._has_full_face(features):
             return "partial_face"
+        if self._check_is_talking(track_id, features):
+            return "user_talking"
         return None
 
     def _check_face_size(self, bbox, frame_shape) -> bool:
@@ -129,3 +136,19 @@ class DetectionRules:
         denom = max(min(left, right), 1e-6)
         ratio = max(left, right) / denom
         return ratio <= max_ratio
+
+    def _check_is_talking(self, track_id: Optional[int], features: Optional[np.ndarray]) -> bool:
+        """Detect talking via mouth-open variance over a small window."""
+        if track_id is None or features is None:
+            return False
+        vec = np.asarray(features, dtype=float).flatten()
+        mouth_block = vec[self.slices["mouth_corner"]]
+        if mouth_block.size < 1:
+            return False
+        current_open = float(mouth_block[0])
+        state = self._track_state.setdefault(track_id, _TrackState())
+        state.mouth_history.append(current_open)
+        if len(state.mouth_history) < state.mouth_history.maxlen:
+            return False
+        jitter = float(np.std(state.mouth_history))
+        return jitter > self.talking_threshold

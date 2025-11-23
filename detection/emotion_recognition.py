@@ -21,6 +21,7 @@ from utils.settings import (
     REST_FACE_MODEL_PATH,
     HEURISTIC_DEBUG,
     HEURISTIC_DEBUG_INTERVAL,
+    TALKING_THRESHOLD_DEFAULT,
 )
 
 CLASSIFIER_CONFIDENCE = 0.55
@@ -68,6 +69,7 @@ class EmotionRecognition:
         self.neutral_feature_mean = None
         self.confidence_gate = DEFAULT_GATE
         self.confidence_margin = DEFAULT_MARGIN
+        self.talking_threshold = TALKING_THRESHOLD_DEFAULT
         self.heuristics = EmotionHeuristicScorer(
             debug=HEURISTIC_DEBUG,
             debug_interval=HEURISTIC_DEBUG_INTERVAL,
@@ -197,6 +199,7 @@ class EmotionRecognition:
         thresholds = data.get("thresholds", {})
         self.confidence_gate = thresholds.get("gate", DEFAULT_GATE)
         self.confidence_margin = thresholds.get("margin", DEFAULT_MARGIN)
+        self.talking_threshold = float(data.get("talking_threshold", TALKING_THRESHOLD_DEFAULT))
         mean = classifier.get("scaler_mean")
         scale = classifier.get("scaler_scale")
         if mean is not None and scale is not None:

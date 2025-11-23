@@ -23,7 +23,14 @@ except ImportError:
 from detection.face_detection import detect_faces
 from detection.preprocessing import preprocess_face
 from detection.facemesh_features import extract_facemesh_features
-from utils.settings import REST_FACE_MODEL_PATH, TRAINED_MODEL
+from setup.talking_setup import run_talking_setup, compute_talking_threshold, check_talking_data
+from utils.settings import (
+    REST_FACE_MODEL_PATH,
+    TRAINED_MODEL,
+    TALKING_THRESHOLD_DEFAULT,
+    TALKING_MIN_SAMPLES,
+    TALKING_WINDOW,
+)
 
 EMOTION_PROFILES = [
     ("fear", "Bitte ?ngstlich erstaunt schauen (Augen aufrei?en, Mund leicht ge?ffnet)."),
@@ -56,7 +63,8 @@ class RestFaceCalibrator:
         self.classifier_model_type = None
         self.neutral_feature_mean = None
         self.computed_thresholds = {"gate": 0.60, "margin": 0.08}
-        self.neutral_feature_mean = None
+        self.talking_threshold = TALKING_THRESHOLD_DEFAULT
+        self.talking_samples = 0
 
     def record_emotions(self, duration=10, analyze_every=5):
         """
@@ -72,7 +80,7 @@ class RestFaceCalibrator:
         try:
             for emotion, instruction in EMOTION_PROFILES:
                 if not self._wait_for_start(cam, emotion, instruction):
-                    print("?? Abgebrochen durch Nutzer.")
+                    print("🚫 Abgebrochen durch Nutzer.")
                     return False
 
                 vectors = []
@@ -80,7 +88,7 @@ class RestFaceCalibrator:
                 sample_crops = []
                 frame_count = 0
                 start = time.time()
-                print(f"\n�Y\"� Profil '{emotion}' – Aufnahme gestartet")
+                print(f"\n✅ Profil '{emotion}' – Aufnahme gestartet")
 
                 while time.time() - start < duration:
                     ret, frame = cam.read()
@@ -97,7 +105,7 @@ class RestFaceCalibrator:
                     cv2.imshow("Emotion Profiling", frame)
 
                     if cv2.waitKey(1) & 0xFF == 27:
-                        print("�?O Abgebrochen")
+                        print("🛑 Abgebrochen")
                         return False
 
                     if frame_count % analyze_every == 0 and boxes:
@@ -121,14 +129,14 @@ class RestFaceCalibrator:
                             feature_vectors.append(features)
                             if len(sample_crops) < 3:
                                 sample_crops.append(processed)
-                            print(f"�YY� {emotion}: Sample {len(vectors)}")
+                            print(f"✅ {emotion}: Sample {len(vectors)}")
                         except Exception as exc:
-                            print("�s���? Analysefehler:", exc)
+                            print("⚠️ Analysefehler:", exc)
 
                     frame_count += 1
 
                 if len(vectors) < 3:
-                    print(f"�s���? Zu wenige Samples für {emotion}. Bitte erneut versuchen.")
+                    print(f"⚠️ Zu wenige Samples für {emotion}. Bitte erneut versuchen.")
                     return False
 
                 self.profiles[emotion] = {
@@ -136,13 +144,22 @@ class RestFaceCalibrator:
                     "features": feature_vectors,
                     "samples": sample_crops,
                 }
+
+            # Talking calibration (reuse same camera/window)
+            talking_result = run_talking_setup(
+                cap=cam,
+                window=TALKING_WINDOW,
+                window_name="Emotion Profiling",
+            )
+            self.talking_threshold = float(talking_result.get("threshold", TALKING_THRESHOLD_DEFAULT))
+            self.talking_samples = int(talking_result.get("samples", 0))
         finally:
             cam.release()
             cv2.destroyAllWindows()
 
         self.neutral_feature_mean = self._compute_neutral_feature_mean()
         self._save_snapshot()
-        print("�o. Alle Emotionen erfolgreich erfasst.")
+        print("✅ Alle Emotionen erfolgreich erfasst.")
         return True
 
     def train(self):
@@ -202,6 +219,10 @@ class RestFaceCalibrator:
             model_data["classifier"] = self.classifier_params
         if self.neutral_feature_mean is not None:
             model_data["neutral_feature_mean"] = self.neutral_feature_mean.tolist()
+        if self.computed_thresholds:
+            model_data["thresholds"] = self.computed_thresholds
+        model_data["talking_threshold"] = float(self.talking_threshold)
+        model_data["talking_samples"] = int(self.talking_samples)
 
         self.model_path.parent.mkdir(parents=True, exist_ok=True)
         with self.model_path.open("w", encoding="utf-8") as f:
@@ -283,6 +304,9 @@ class RestFaceCalibrator:
             self.computed_thresholds = {"gate": 0.60, "margin": 0.08}
             return
         mat = np.array(vecs, dtype=float)
+        # DeepFace emotion scores are percentages (0-100); normalize to [0,1]
+        if np.max(mat) > 1.5:
+            mat = mat / 100.0
         # assume last column is neutral prob; drop it to inspect non-neutral noise
         if mat.shape[1] > 1:
             non_neutral = mat[:, :-1]
@@ -292,9 +316,9 @@ class RestFaceCalibrator:
         std_noise = float(np.std(non_neutral))
         suggested_gate = max_noise + 2.0 * std_noise
         gate = float(np.clip(suggested_gate, 0.45, 0.85))
-        margin = float(max(0.05, std_noise * 1.5))
+        margin = float(min(0.25, max(0.05, std_noise * 1.5)))
         self.computed_thresholds = {"gate": gate, "margin": margin}
-        print(f"📊 Auto-Tuned Gate: {gate:.2f}, Margin: {margin:.2f}")
+        print(f"Auto-Tuned Gate: {gate:.2f}, Margin: {margin:.2f}")
 
     def _warmup_session(self, cam, seconds: float = 2.0, show_preview: bool = True):
         """Read a few frames and run dummy DeepFace/FaceMesh to avoid cold-start drops."""
@@ -467,6 +491,10 @@ class RestFaceCalibrator:
             }
         if self.neutral_feature_mean is not None:
             data["neutral_feature_mean"] = self.neutral_feature_mean.tolist()
+        if self.computed_thresholds:
+            data["thresholds"] = self.computed_thresholds
+        data["talking_threshold"] = float(self.talking_threshold)
+        data["talking_samples"] = int(self.talking_samples)
         self.snapshot_path.parent.mkdir(parents=True, exist_ok=True)
         with self.snapshot_path.open("w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
@@ -496,6 +524,11 @@ class RestFaceCalibrator:
             self.neutral_feature_mean = np.array(neutral_mean, dtype=float)
         else:
             self.neutral_feature_mean = self._compute_neutral_feature_mean()
+        thresholds = data.get("thresholds")
+        if thresholds:
+            self.computed_thresholds = thresholds
+        self.talking_threshold = float(data.get("talking_threshold", TALKING_THRESHOLD_DEFAULT))
+        self.talking_samples = int(data.get("talking_samples", 0))
         print(f"?? Emotion-Snapshot geladen ({self.snapshot_path})")
         return True
 

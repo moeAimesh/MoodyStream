@@ -22,6 +22,7 @@ from detection.gesture_recognition import detect_gestures
 from detection.kalman_tracker import Tracker as KalmanTracker
 from detection.single_face_tracker import SingleFaceTracker
 from detection.tracking_types import TrackInfo, random_color
+from detection.detection_rules import DetectionRules
 from detection.virtual_cam import (
     VirtualCamError,
     VirtualCamPublisher,
@@ -37,6 +38,7 @@ from utils.settings import (
     MAX_MISSING_FRAMES,
     SOUND_MAP_PATH,
     TRACKING_MODE,
+    TALKING_THRESHOLD_DEFAULT,
 )
 
 apply_fix()
@@ -130,6 +132,7 @@ def start_detection(
     raw_track_cache: Dict[int, TrackInfo] = {}
     raw_detection_state = {"last_frame": -FACE_DETECT_INTERVAL_SINGLE}
     default_emotion = "neutral"
+    rules = DetectionRules(talking_threshold=er.talking_threshold)
 
     frame_idx = 0
     virtual_cam_publisher: Optional[VirtualCamPublisher] = None
@@ -220,6 +223,14 @@ def start_detection(
                     continue
                 features = extract_facemesh_features(frame_full, track.bbox)
                 if features is None:
+                    continue
+                skip_reason = rules.should_skip(
+                    track_id=track.track_id,
+                    bbox=track.bbox,
+                    frame_shape=frame_full.shape[:2],
+                    features=features,
+                )
+                if skip_reason:
                     continue
                 capture_ts = time.perf_counter()
                 job = (next(job_ids), track.track_id, crop, features, capture_ts)
