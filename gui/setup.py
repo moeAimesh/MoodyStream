@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from typing import Dict, Iterable, Optional, Sequence
 
-from PyQt5 import QtCore, QtWidgets
+import cv2
+import numpy as np
+
+from PyQt5 import QtCore, QtGui, QtWidgets
 
 
 def ensure_qt_app() -> QtWidgets.QApplication:
@@ -29,8 +32,8 @@ class EmotionSelectorWindow(QtWidgets.QWidget):
     def __init__(self, emotions: Iterable[str], position: Optional[tuple[int, int]] = None):
         super().__init__()
         self.setWindowTitle("Moody – Emotion Selector")
-        self.setFixedWidth(360)
-        self.setMinimumHeight(480)
+        self.setFixedWidth(520)
+        self.setMinimumHeight(640)
         self.setWindowFlag(QtCore.Qt.WindowStaysOnTopHint, True)
         self._buttons: Dict[str, QtWidgets.QPushButton] = {}
         self._pending_selection: Optional[str] = None
@@ -38,10 +41,26 @@ class EmotionSelectorWindow(QtWidgets.QWidget):
         self._aborted = False
         self._start_requested = False
         self._done_requested = False
+        self._completed_emotions: set[str] = set()
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(10)
+
+        self.header_label = QtWidgets.QLabel(
+            "We'll go through the setup process. First, you'll select an emotion. "
+            "When you're ready to mime the emotion, press start. It's best to show the emotion beforehand, "
+            "because the program will start recording immediately. If you're finished and you don't like the result "
+            "because you accidentally laughed, you can record it again."
+        )
+        self.header_label.setWordWrap(True)
+        layout.addWidget(self.header_label)
+
+        self.camera_label = QtWidgets.QLabel()
+        self.camera_label.setMinimumHeight(420)
+        self.camera_label.setAlignment(QtCore.Qt.AlignCenter)
+        self.camera_label.setStyleSheet("background: #111; border: 1px solid #444;")
+        layout.addWidget(self.camera_label)
 
         self.info_label = QtWidgets.QLabel("Choose the next emotion.")
         self.info_label.setWordWrap(True)
@@ -96,7 +115,7 @@ class EmotionSelectorWindow(QtWidgets.QWidget):
         return selection
 
     def _handle_selection(self, emotion: str):
-        if self._buttons.get(emotion) and self._buttons[emotion].isEnabled():
+        if self._buttons.get(emotion):
             self._pending_selection = emotion
             self.status_label.setText(f"Selected: {emotion.title()} (ready)")
             self._update_instruction(emotion)
@@ -116,21 +135,21 @@ class EmotionSelectorWindow(QtWidgets.QWidget):
             self._update_instruction(None)
 
     def mark_completed(self, emotion: str):
-        """Disable a button once the emotion is captured."""
+        """Mark an emotion as captured."""
         btn = self._buttons.get(emotion)
         if btn:
-            btn.setEnabled(False)
             btn.setStyleSheet("background-color: #c6efce;")
             btn.setText(f"{emotion.title()} ✓")
         self.status_label.setText(f"{emotion.title()} completed.")
         if self._active_emotion == emotion:
             self._active_emotion = None
+        self._completed_emotions.add(emotion)
         if self.remaining_emotions() == 0:
             self.done_button.setEnabled(True)
 
     def remaining_emotions(self) -> int:
         """Return the count of still enabled emotions."""
-        return sum(1 for btn in self._buttons.values() if btn.isEnabled())
+        return max(0, len(self._buttons) - len(self._completed_emotions))
 
     def consume_start_request(self) -> bool:
         if self._start_requested:
@@ -169,6 +188,23 @@ class EmotionSelectorWindow(QtWidgets.QWidget):
         self._done_requested = True
         self.start_button.setEnabled(False)
         self.done_button.setEnabled(False)
+
+    def update_frame(self, frame: np.ndarray):
+        """Display the latest camera frame inside the selector window."""
+        if frame is None or frame.size == 0:
+            return
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        h, w, _ = rgb.shape
+        qimg = QtGui.QImage(rgb.data, w, h, 3 * w, QtGui.QImage.Format_RGB888)
+        pixmap = QtGui.QPixmap.fromImage(qimg)
+        self.camera_label.setPixmap(
+            pixmap.scaled(
+                self.camera_label.width(),
+                self.camera_label.height(),
+                QtCore.Qt.KeepAspectRatio,
+                QtCore.Qt.SmoothTransformation,
+            )
+        )
 
 
 class SetupInstructionDialog(QtWidgets.QDialog):
