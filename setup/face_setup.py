@@ -14,7 +14,7 @@ import json
 import sys
 import time
 from pathlib import Path
-from typing import List, Optional, Sequence, Tuple
+from typing import Callable, List, Optional, Sequence, Tuple
 from numpy.random import default_rng
 
 try:
@@ -87,25 +87,64 @@ class RestFaceCalibrator:
         # Warm-up: Modelle/Kamera initialisieren, bevor Samples gezählt werden.
         self._warmup_session(cam)
 
-        reset_profiles = emotions is None
-        if reset_profiles:
+        selection_mode = emotions is None
+        if selection_mode:
             self.profiles = {}
 
+        pending_order = [emotion for emotion, _ in targets]
+        pending_map = {emotion: instruction for emotion, instruction in targets}
+
+        qt_app = None
+        selector_ui = None
+        event_pump: Optional[Callable[[], None]] = None
+        abort_checker: Optional[Callable[[], bool]] = None
+
+        if selection_mode and pending_order:
+            qt_app, selector_ui = self._init_emotion_selector(pending_order)
+            if selector_ui is not None and qt_app is not None:
+                event_pump = lambda: qt_app.processEvents()
+                abort_checker = selector_ui.is_aborted
+            else:
+                selector_ui = None
+
         try:
-            for emotion, instruction in targets:
+            while pending_map:
+                if selector_ui is not None and qt_app is not None:
+                    selected = self._wait_for_gui_selection(qt_app, selector_ui, pending_map)
+                    if selected is None:
+                        print("✖️ Emotion-Auswahlfenster geschlossen – Setup abgebrochen.")
+                        return False
+                    emotion = selected
+                else:
+                    if not pending_order:
+                        break
+                    emotion = pending_order.pop(0)
+                instruction = pending_map[emotion]
+                if selector_ui is not None:
+                    selector_ui.set_active_emotion(emotion)
+
                 payload = self._capture_emotion_session(
                     cam,
                     emotion,
                     instruction,
                     duration=duration,
                     analyze_every=analyze_every,
+                    event_pump=event_pump,
+                    abort_checker=abort_checker,
                 )
                 if payload is None:
                     return False
                 self.profiles[emotion] = payload
+                del pending_map[emotion]
+                if selector_ui is not None:
+                    selector_ui.mark_completed(emotion)
         finally:
             cam.release()
             cv2.destroyAllWindows()
+            if selector_ui is not None:
+                selector_ui.close()
+                if qt_app is not None:
+                    qt_app.processEvents()
 
         self.neutral_feature_mean = self._compute_neutral_feature_mean()
         self._save_snapshot()
@@ -146,8 +185,16 @@ class RestFaceCalibrator:
         *,
         duration: int,
         analyze_every: int,
+        event_pump: Optional[Callable[[], None]] = None,
+        abort_checker: Optional[Callable[[], bool]] = None,
     ):
-        if not self._wait_for_start(cam, emotion, instruction):
+        if not self._wait_for_start(
+            cam,
+            emotion,
+            instruction,
+            event_pump=event_pump,
+            abort_checker=abort_checker,
+        ):
             print("?? Abgebrochen durch Nutzer.")
             return None
 
@@ -181,6 +228,11 @@ class RestFaceCalibrator:
 
             if cv2.waitKey(1) & 0xFF == 27:
                 print("�?O Abgebrochen")
+                return None
+            if event_pump:
+                event_pump()
+            if abort_checker and abort_checker():
+                print("✖️ Aufnahme über GUI abgebrochen.")
                 return None
 
             if frame_count % analyze_every == 0 and boxes:
@@ -219,6 +271,30 @@ class RestFaceCalibrator:
             "features": feature_vectors,
             "samples": sample_crops,
         }
+
+    def _init_emotion_selector(self, emotions: Sequence[str]):
+        """Initialisiere PyQt-Selector, falls verfügbar."""
+        try:
+            from gui.components.emotion_selector import EmotionSelectorWindow, ensure_qt_app
+        except Exception as exc:  # pragma: no cover - GUI optional
+            print(f"⚠️ Emotion-Selector GUI konnte nicht geladen werden ({exc}).")
+            return None, None
+        app = ensure_qt_app()
+        window = EmotionSelectorWindow(emotions)
+        window.show()
+        return app, window
+
+    def _wait_for_gui_selection(self, qt_app, selector, valid_emotions):
+        """Blockiert, bis der Nutzer über die GUI eine Emotion gewählt hat."""
+        while True:
+            if selector.is_aborted():
+                return None
+            if qt_app:
+                qt_app.processEvents()
+            choice = selector.take_selection()
+            if choice and choice in valid_emotions:
+                return choice
+            time.sleep(0.05)
 
     def train(self):
         """
@@ -411,7 +487,14 @@ class RestFaceCalibrator:
                             pass
         print("Warm-up abgeschlossen. Starte Aufnahme ...")
 
-    def _wait_for_start(self, cam, emotion: str, instruction: str) -> bool:
+    def _wait_for_start(
+        self,
+        cam,
+        emotion: str,
+        instruction: str,
+        event_pump: Optional[Callable[[], None]] = None,
+        abort_checker: Optional[Callable[[], bool]] = None,
+    ) -> bool:
         """Show live preview and wait for ENTER/SPACE to start, ESC/Q to abort."""
         print(f"\nProfil '{emotion}': {instruction}")
         print("Drücke ENTER/SPACE zum Starten, ESC oder q zum Abbrechen.")
@@ -431,6 +514,10 @@ class RestFaceCalibrator:
             )
             cv2.imshow("Emotion Profiling", overlay)
             key = cv2.waitKey(1) & 0xFF
+            if event_pump:
+                event_pump()
+            if abort_checker and abort_checker():
+                return False
             if key in {13, 10, 32}:  # Enter/Return or Space
                 return True
             if key in {27, ord("q"), ord("Q")}:
