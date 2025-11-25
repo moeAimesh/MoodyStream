@@ -83,8 +83,6 @@ class RestFaceCalibrator:
         emotions: Optional[Sequence[str]] = None,
         duration: int = 10,
         analyze_every: int = 5,
-        selector_emotions: Optional[Sequence[str]] = None,
-        enabled_emotions: Optional[Sequence[str]] = None,
     ):
         """
         Führt den Nutzer durch verschiedene Emotionen und sammelt Embeddings.
@@ -111,19 +109,12 @@ class RestFaceCalibrator:
         self._prepare_camera_window()
         self._warmup_session(cam)
 
-        reset_profiles = emotions is None
-        use_selector = selector_emotions is not None or reset_profiles
-        if reset_profiles:
+        selection_mode = emotions is None
+        if selection_mode:
             self.profiles = {}
 
         pending_order = [emotion for emotion, _ in targets]
         pending_map = {emotion: instruction for emotion, instruction in targets}
-        selector_list = (
-            list(selector_emotions) if selector_emotions is not None else list(pending_order)
-        )
-        enabled_list = (
-            list(enabled_emotions) if enabled_emotions is not None else list(pending_order)
-        )
 
         qt_app = None
         selector_ui = None
@@ -134,11 +125,9 @@ class RestFaceCalibrator:
         frame_callback: Optional[Callable[[np.ndarray], None]] = None
         done_checker: Optional[Callable[[], bool]] = None
 
-        if use_selector and selector_list:
+        if selection_mode and pending_order:
             qt_app, selector_ui = self._init_emotion_selector(
-                selector_list,
-                position=SELECTOR_WINDOW_POSITION,
-                enabled_emotions=enabled_list,
+                pending_order, position=SELECTOR_WINDOW_POSITION
             )
             if selector_ui is not None and qt_app is not None:
                 event_pump = lambda: qt_app.processEvents()
@@ -200,7 +189,7 @@ class RestFaceCalibrator:
                     break
                 if done_triggered:
                     break
-            if use_selector and selector_ui is not None and not pending_map:
+            if selection_mode and selector_ui is not None and not pending_map:
                 self._wait_for_done_confirmation(qt_app, selector_ui)
         finally:
             cam.release()
@@ -373,10 +362,7 @@ class RestFaceCalibrator:
         )
 
     def _init_emotion_selector(
-        self,
-        emotions: Sequence[str],
-        position: Optional[tuple[int, int]] = None,
-        enabled_emotions: Optional[Sequence[str]] = None,
+        self, emotions: Sequence[str], position: Optional[tuple[int, int]] = None
     ):
         """Initialisiere PyQt-Selector, falls verfügbar."""
         try:
@@ -385,7 +371,7 @@ class RestFaceCalibrator:
             print(f"⚠️ Emotion-Selector GUI konnte nicht geladen werden ({exc}).")
             return None, None
         app = ensure_qt_app()
-        window = EmotionSelectorWindow(emotions, position=position, enabled_emotions=enabled_emotions)
+        window = EmotionSelectorWindow(emotions, position=position)
         window.show()
         return app, window
 
