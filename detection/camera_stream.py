@@ -155,7 +155,7 @@ def start_detection(
 
             if tracking_mode == "multi":
                 tracks = update_multi_face_tracks(
-                    frame_full, frame_idx, now, multi_tracker, multi_cache
+                    frame_full, frame_idx, now, multi_tracker, multi_cache, er
                 )
             elif tracking_mode == "single":
                 tracks = single_tracker.update(frame_full, frame_idx, now)
@@ -307,7 +307,14 @@ def start_detection(
         visualise_avg_fps()
 
 
-def update_multi_face_tracks(frame, frame_idx, now, tracker: KalmanTracker, cache: Dict[int, TrackInfo]):
+def update_multi_face_tracks(
+    frame,
+    frame_idx,
+    now,
+    tracker: KalmanTracker,
+    cache: Dict[int, TrackInfo],
+    er: EmotionRecognition | None = None,
+):
     detections = []
     if frame_idx % max(1, FACE_DETECT_INTERVAL_MULTI) == 0:
         detections = detect_faces(frame)
@@ -321,6 +328,7 @@ def update_multi_face_tracks(frame, frame_idx, now, tracker: KalmanTracker, cach
     result = tracker.step({"detections": det_array, "classes": classes})
 
     updated: Dict[int, TrackInfo] = {}
+    previous_ids = set(cache.keys())
     for tid, bbox in zip(result["trackIds"], result["tracks"]):
         bbox = tuple(int(v) for v in bbox)
         info = cache.get(tid)
@@ -330,6 +338,11 @@ def update_multi_face_tracks(frame, frame_idx, now, tracker: KalmanTracker, cach
             info.bbox = bbox
             info.last_seen = now
         updated[tid] = info
+
+    removed_ids = previous_ids - set(updated.keys())
+    if er:
+        for rid in removed_ids:
+            er.drop_track_state(rid)
 
     cache.clear()
     cache.update(updated)

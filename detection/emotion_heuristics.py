@@ -19,9 +19,9 @@ BLOCK_SPECS = [
 ]
 
 SURPRISE_MOUTH_OPEN_MIN = 0.10
-FEAR_LID_OPEN_MIN = 0.06
-SAD_DROP_MIN = 0.24
-SAD_AVG_MIN = 0.30
+FEAR_LID_OPEN_MIN = 0.03
+SAD_DROP_MIN = 0.20
+SAD_AVG_MIN = 0.27
 SAD_MOUTH_OPEN_MAX = 0.16
 
 
@@ -48,7 +48,7 @@ class EmotionRules:
     def happy(self, features: np.ndarray) -> bool:
         mouth = self._get_block(features, "mouth_corner")
         cheek = self._get_block(features, "cheek_raise")
-        return mouth[2] < 0.4 and float(np.mean(cheek[:2])) > 0.02
+        return mouth[2] < 0.45 and float(np.mean(cheek[:2])) > 0
 
     def sad(self, features: np.ndarray) -> bool:
         mouth_drop = self._get_block(features, "mouth_depressor")
@@ -84,6 +84,8 @@ class EmotionHeuristicScorer:
         label are met. Unknown labels are accepted by default.
         """
         if features is None:
+            return True
+        if label == "happy":
             return True
         vec = np.asarray(features, dtype=float).flatten()
         if vec.size < self.total_dim or not np.all(np.isfinite(vec)):
