@@ -83,6 +83,8 @@ class RestFaceCalibrator:
         emotions: Optional[Sequence[str]] = None,
         duration: int = 10,
         analyze_every: int = 5,
+        selector_emotions: Optional[Sequence[str]] = None,
+        enabled_emotions: Optional[Sequence[str]] = None,
     ):
         """
         Führt den Nutzer durch verschiedene Emotionen und sammelt Embeddings.
@@ -113,8 +115,17 @@ class RestFaceCalibrator:
         if selection_mode:
             self.profiles = {}
 
+        instruction_map = {emotion: instruction for emotion, instruction in targets}
         pending_order = [emotion for emotion, _ in targets]
-        pending_map = {emotion: instruction for emotion, instruction in targets}
+        pending_map = dict(instruction_map)  # emotions still required at least once
+
+        use_selector = selector_emotions is not None or selection_mode
+        selector_list = (
+            list(selector_emotions) if selector_emotions is not None else list(instruction_map)
+        )
+        enabled_list = (
+            list(enabled_emotions) if enabled_emotions is not None else list(instruction_map)
+        )
 
         qt_app = None
         selector_ui = None
@@ -125,9 +136,9 @@ class RestFaceCalibrator:
         frame_callback: Optional[Callable[[np.ndarray], None]] = None
         done_checker: Optional[Callable[[], bool]] = None
 
-        if selection_mode and pending_order:
+        if use_selector and selector_list:
             qt_app, selector_ui = self._init_emotion_selector(
-                pending_order, position=SELECTOR_WINDOW_POSITION
+                selector_list, position=SELECTOR_WINDOW_POSITION, enabled_emotions=enabled_list
             )
             if selector_ui is not None and qt_app is not None:
                 event_pump = lambda: qt_app.processEvents()
@@ -140,18 +151,28 @@ class RestFaceCalibrator:
                 selector_ui = None
 
         try:
-            while pending_map:
+            while pending_map or (selector_ui is not None and qt_app is not None):
                 if selector_ui is not None and qt_app is not None:
-                    selected = self._wait_for_gui_selection(qt_app, selector_ui, pending_map)
+                    # allow finishing if all pending emotions are done and user clicks Done
+                    if not pending_map and done_checker and done_checker():
+                        break
+                    selected = self._wait_for_gui_selection(
+                        qt_app, selector_ui, instruction_map, done_checker=done_checker
+                    )
                     if selected is None:
                         print("✖️ Emotion selector closed – cancelling setup.")
                         return False
+                    if selected == "__done__":
+                        if not pending_map:
+                            break
+                        else:
+                            continue
                     emotion = selected
                 else:
                     if not pending_order:
                         break
                     emotion = pending_order.pop(0)
-                instruction = pending_map[emotion]
+                instruction = instruction_map[emotion]
                 if selector_ui is not None:
                     selector_ui.set_active_emotion(emotion)
 
@@ -170,22 +191,24 @@ class RestFaceCalibrator:
                         frame_callback=frame_callback,
                     )
                     if override:
-                        if override not in pending_map:
+                        if override not in pending_map and override not in pending_order and override not in [e for e, _ in targets]:
                             print(f"⚠️ Selection '{override}' unknown – ignoring.")
                             continue
                         emotion = override
-                        instruction = pending_map[emotion]
+                        instruction = pending_map.get(emotion) or next((instr for emo, instr in targets if emo == emotion), None)
                         if selector_ui is not None:
                             selector_ui.set_active_emotion(emotion)
                         continue
                     if payload is None:
                         return False
                     self.profiles[emotion] = payload
-                    del pending_map[emotion]
-                    if selector_ui is not None:
-                        selector_ui.mark_completed(emotion)
-                        if done_checker and done_checker():
-                            done_triggered = True
+
+                    if emotion in pending_map:
+                        del pending_map[emotion]
+                        if selector_ui is not None:
+                            selector_ui.mark_completed(emotion)
+                            if done_checker and done_checker():
+                                done_triggered = True
                     break
                 if done_triggered:
                     break
@@ -362,7 +385,10 @@ class RestFaceCalibrator:
         )
 
     def _init_emotion_selector(
-        self, emotions: Sequence[str], position: Optional[tuple[int, int]] = None
+        self,
+        emotions: Sequence[str],
+        position: Optional[tuple[int, int]] = None,
+        enabled_emotions: Optional[Sequence[str]] = None,
     ):
         """Initialisiere PyQt-Selector, falls verfügbar."""
         try:
@@ -371,17 +397,21 @@ class RestFaceCalibrator:
             print(f"⚠️ Emotion-Selector GUI konnte nicht geladen werden ({exc}).")
             return None, None
         app = ensure_qt_app()
-        window = EmotionSelectorWindow(emotions, position=position)
+        window = EmotionSelectorWindow(
+            emotions, position=position, enabled_emotions=enabled_emotions
+        )
         window.show()
         return app, window
 
-    def _wait_for_gui_selection(self, qt_app, selector, valid_emotions):
-        """Blockiert, bis der Nutzer über die GUI eine Emotion gewählt hat."""
+    def _wait_for_gui_selection(self, qt_app, selector, valid_emotions, done_checker=None):
+        """Blockiert, bis der Nutzer über die GUI eine Emotion gewählt hat oder Done klickt."""
         while True:
             if selector.is_aborted():
                 return None
             if qt_app:
                 qt_app.processEvents()
+            if done_checker and done_checker():
+                return "__done__"
             choice = selector.take_selection()
             if choice and choice in valid_emotions:
                 return choice
