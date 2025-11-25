@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Union
 
 import numpy as np
 from sklearn.ensemble import IsolationForest
@@ -28,9 +28,26 @@ def _combined_vectors(vectors: np.ndarray, features: np.ndarray) -> np.ndarray:
 def _detect_mask(
     data: np.ndarray,
     method: str,
-    contamination: float,
+    contamination: Union[float, str],
     radius_sigma: float,
 ) -> tuple[np.ndarray, np.ndarray]:
+    cont_value: Union[float, str]
+    if isinstance(contamination, str):
+        raw = contamination.strip().lower()
+        if raw == "auto":
+            cont_value = "auto"
+        else:
+            try:
+                cont_value = float(raw)
+            except ValueError:
+                cont_value = 0.05
+    else:
+        cont_value = float(contamination)
+
+    if cont_value != "auto":
+        cont_value = min(cont_value, 0.5)
+        cont_value = max(cont_value, 0.001)
+
     if method == "lof":
         n_neighbors = min(20, data.shape[0] - 1)
         if n_neighbors < 2:
@@ -38,7 +55,7 @@ def _detect_mask(
             return np.ones(data.shape[0], dtype=bool), np.ones(data.shape[0])
         detector = LocalOutlierFactor(
             n_neighbors=n_neighbors,
-            contamination=min(contamination, 0.5),
+            contamination=cont_value,
         )
         labels = detector.fit_predict(data)
         scores = detector.negative_outlier_factor_
@@ -55,7 +72,7 @@ def _detect_mask(
         return mask, distances
 
     detector = IsolationForest(
-        contamination=min(contamination, 0.5),
+        contamination=cont_value,
         n_estimators=300,
         random_state=42,
     )
@@ -68,7 +85,7 @@ def _detect_mask(
 def filter_outliers(
     calibrator: RestFaceCalibrator,
     method: str,
-    contamination: float,
+    contamination: Union[float, str],
     radius_sigma: float,
 ) -> Dict[str, Dict[str, float]]:
     """Filter vectors/features using an unsupervised detector on the combined vector."""
@@ -129,9 +146,9 @@ def main() -> None:
     )
     parser.add_argument(
         "--contamination",
-        type=float,
-        default=0.05,
-        help="Estimated fraction of outliers per class (used by the detectors).",
+        type=str,
+        default="0.05",
+        help='Estimated fraction of outliers per class (used by the detectors). Use "auto" for adaptive.',
     )
     parser.add_argument(
         "--radius-sigma",
@@ -150,10 +167,15 @@ def main() -> None:
     if not calibrator.load_snapshot():
         raise SystemExit("Snapshot konnte nicht geladen werden.")
 
+    try:
+        contamination: Union[float, str] = float(args.contamination)
+    except ValueError:
+        contamination = args.contamination
+
     summary = filter_outliers(
         calibrator,
         method=args.method,
-        contamination=args.contamination,
+        contamination=contamination,
         radius_sigma=args.radius_sigma,
     )
     removed_total = sum(item["removed"] for item in summary.values())
