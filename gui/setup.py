@@ -29,7 +29,12 @@ class EmotionSelectorWindow(QtWidgets.QWidget):
         "neutral": "Neutral: Look like you do when you watch a video or game—don't force emotionlessness, just look the way you normally do.",
     }
 
-    def __init__(self, emotions: Iterable[str], position: Optional[tuple[int, int]] = None):
+    def __init__(
+        self,
+        emotions: Iterable[str],
+        position: Optional[tuple[int, int]] = None,
+        enabled_emotions: Optional[Iterable[str]] = None,
+    ):
         super().__init__()
         self.setWindowTitle("Moody – Emotion Selector")
         self.setFixedWidth(520)
@@ -42,6 +47,8 @@ class EmotionSelectorWindow(QtWidgets.QWidget):
         self._start_requested = False
         self._done_requested = False
         self._completed_emotions: set[str] = set()
+        self._disabled_emotions: set[str] = set()
+        enabled_set = {e.lower() for e in enabled_emotions} if enabled_emotions else None
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
@@ -73,6 +80,11 @@ class EmotionSelectorWindow(QtWidgets.QWidget):
             btn = QtWidgets.QPushButton(emotion.title())
             btn.setObjectName(emotion)
             btn.clicked.connect(lambda _=False, name=emotion: self._handle_selection(name))
+            is_enabled = enabled_set is None or emotion.lower() in enabled_set
+            btn.setEnabled(is_enabled)
+            if not is_enabled:
+                btn.setStyleSheet("background-color: #e0e0e0; color: #777;")
+                self._disabled_emotions.add(emotion)
             self._buttons[emotion] = btn
             grid.addWidget(btn, row, col)
             col += 1
@@ -115,7 +127,7 @@ class EmotionSelectorWindow(QtWidgets.QWidget):
         return selection
 
     def _handle_selection(self, emotion: str):
-        if self._buttons.get(emotion):
+        if self._buttons.get(emotion) and emotion not in self._disabled_emotions:
             self._pending_selection = emotion
             self.status_label.setText(f"Selected: {emotion.title()} (ready)")
             self._update_instruction(emotion)
@@ -149,7 +161,8 @@ class EmotionSelectorWindow(QtWidgets.QWidget):
 
     def remaining_emotions(self) -> int:
         """Return the count of still enabled emotions."""
-        return max(0, len(self._buttons) - len(self._completed_emotions))
+        enabled_total = len(self._buttons) - len(self._disabled_emotions)
+        return max(0, enabled_total - len(self._completed_emotions))
 
     def consume_start_request(self) -> bool:
         if self._start_requested:
