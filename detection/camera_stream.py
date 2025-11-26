@@ -28,14 +28,14 @@ from detection.virtual_cam import (
     resolve_cam_dims,
     resolve_cam_fps,
 )
+from detection.gesture_mapper import get_sound_for_gestures
+from detection.emotion_mapper import get_sound_for_emotions
 from sounds.play_sound import play
-from utils.json_manager import load_json
 from utils.mediapipe_fix import apply_fix
 from utils.settings import (
     FACE_DETECT_INTERVAL_MULTI,
     FACE_DETECT_INTERVAL_SINGLE,
     MAX_MISSING_FRAMES,
-    SOUND_MAP_PATH,
     TRACKING_MODE,
 )
 
@@ -93,7 +93,7 @@ def start_detection(
         raise RuntimeError(f"Kamera-Index {camera_index} konnte nicht geöffnet werden.")
     thumb_start_time = None
     sound_played = False
-    sounds = load_json(SOUND_MAP_PATH)
+    
 
     er = EmotionRecognition(threshold=10)
     print("🎥 Kamera gestartet – Gesten- und Emotionserkennung aktiv!")
@@ -130,6 +130,9 @@ def start_detection(
     raw_track_cache: Dict[int, TrackInfo] = {}
     raw_detection_state = {"last_frame": -FACE_DETECT_INTERVAL_SINGLE}
     default_emotion = "neutral"
+    
+    #merkt sich zuletzt gespielte Emotion pro Track (damit wir nicht spammen)
+    last_emotions: Dict[int, Optional[str]] = defaultdict(lambda: None)
 
     frame_idx = 0
     virtual_cam_publisher: Optional[VirtualCamPublisher] = None
@@ -183,17 +186,19 @@ def start_detection(
                 (255, 0, 0),
                 2,
             )
+            
+            #GESTENERKENNUNG
 
             gestures = detect_gestures(frame_full)
             current_time = time.time()
-            if "thumbsup" in gestures:
+            if gestures:
                 if thumb_start_time is None:
                     thumb_start_time = current_time
                     sound_played = False
                 elif (current_time - thumb_start_time) >= 1 and not sound_played:
-                    sound_path = sounds.get("thumbsup") or sounds.get("ok")
-                    if sound_path:
-                        play(sound_path)
+                    g_key, g_path = get_sound_for_gestures(gestures)
+                    if g_path:
+                         play(g_path)
                     sound_played = True
             else:
                 thumb_start_time = None
@@ -211,7 +216,8 @@ def start_detection(
                 (255, 0, 0),
                 2,
             )
-
+            
+            #Emotion-Jobs in Queue schieben
             for track in tracks.values():
                 if now - track.last_enqueued < EMOTION_ENQUEUE_INTERVAL:
                     continue
@@ -228,7 +234,8 @@ def start_detection(
                     track.last_enqueued = now
                 except queue.Full:
                     pass
-
+                
+            #Emotion-Ergebnisse aus Queue holen
             try:
                 while True:
                     track_id, emotion_value, lag_ms = emotion_results.get_nowait()
@@ -240,6 +247,20 @@ def start_detection(
             except queue.Empty:
                 pass
 
+            #Emotion-Sounds über Mapper (pro Track, bei Änderung & != neutral)
+            for track in tracks.values():
+                current_emotion = track.emotion or default_emotion
+                last = last_emotions[track.track_id]
+                if current_emotion != last and current_emotion != "neutral":
+                    s_key, s_path = get_sound_for_emotions([current_emotion])
+                    if s_path:
+                        play(s_path)
+                    last_emotions[track.track_id] = current_emotion
+                else:
+                    #einmal setzen, damit spätere Vergleiche stabil sind
+                    if last is None:
+                        last_emotions[track.track_id] = current_emotion
+            
             for track in tracks.values():
                 x, y, w, h = track.bbox
                 cv2.rectangle(frame_full, (x, y), (x + w, y + h), track.color, 2)
