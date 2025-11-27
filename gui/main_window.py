@@ -7,12 +7,109 @@ Ausgaben: visuelles Feedback, Buttons („Setup erneut starten", „Profil wechs
 Tipp: GUI in eigenem Thread oder async."""
 import sys
 import cv2
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
+import webbrowser
+import os
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QLabel, QDialog, 
                              QSpinBox, QSlider, QFormLayout, QMenuBar, QMenu,
-                             QComboBox, QGridLayout)
-from PyQt6.QtCore import QTimer, Qt
-from PyQt6.QtGui import QImage, QPixmap, QAction
+                             QComboBox, QGridLayout, QLineEdit, QFileDialog,
+                             QMessageBox)
+from PyQt5.QtCore import QTimer, Qt, QUrl
+from PyQt5.QtGui import QImage, QPixmap, QCursor, QIcon
+from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
+
+
+class SoundButton(QPushButton):
+    """Erweiterter Button mit Sound-Funktionalität"""
+    def __init__(self, text, parent=None):
+        super().__init__(text, parent)
+        self.sound_path = None
+        self.player = QMediaPlayer()
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self.show_context_menu)
+    
+    def show_context_menu(self, position):
+        """Zeigt Kontextmenü beim Rechtsklick"""
+        menu = QMenu()
+        
+        # Optionen im Kontextmenü
+        search_action = menu.addAction("Sound im Web suchen")
+        load_action = menu.addAction("Sound-Datei laden")
+        menu.addSeparator()
+        
+        if self.sound_path:
+            play_action = menu.addAction("Sound abspielen")
+            remove_action = menu.addAction("Sound entfernen")
+            info_action = menu.addAction(f"Aktueller Sound: {self.sound_path.split('/')[-1]}")
+            info_action.setEnabled(False)
+        
+        # Aktion ausführen
+        action = menu.exec_(self.mapToGlobal(position))
+        
+        if action == search_action:
+            self.open_sound_search()
+        elif action == load_action:
+            self.load_sound_file()
+        elif self.sound_path and action == play_action:
+            self.play_sound()
+        elif self.sound_path and action == remove_action:
+            self.remove_sound()
+    
+    def open_sound_search(self):
+        """Öffnet MyInstants im Browser"""
+        url = "https://www.myinstants.com/de/search/?name=MEME"
+        webbrowser.open(url)
+        
+        # Info-Dialog anzeigen
+        QMessageBox.information(
+            self,
+            "Sound-Suche",
+            "Browser wurde geöffnet!\n\n"
+            "So verknüpfst du einen Sound:\n"
+            "1. Suche einen Sound auf MyInstants\n"
+            "2. Lade den Sound runter (z.B. indem du ihn dir selber als Email schickst\n"
+            "3. Geh wieder auf unsere App und gehe mit einem Rechtsklick auf sound hinzufügen'\n"
+            "4. Wähle deinen eruntergeladenen Sound aus"
+        )
+    
+    def load_sound_file(self):
+        """Lädt eine Sound-Datei vom Computer"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Sound-Datei auswählen",
+            "",
+            "Audio-Dateien (*.mp3 *.wav *.ogg);;Alle Dateien (*.*)"
+        )
+        
+        if file_path:
+            self.sound_path = file_path
+            url = QUrl.fromLocalFile(file_path)
+            self.player.setMedia(QMediaContent(url))
+            self.player.setVolume(100)
+            print(f"Sound '{file_path}' wurde Button '{self.text()}' zugewiesen")
+    
+    def play_sound(self):
+        """Spielt den verknüpften Sound ab"""
+        if self.sound_path and self.player:
+            self.player.stop()  # stoppt vorherigen Sound falls noch am Laufen
+            self.player.play()
+            print(f"Sound wird abgespielt: {self.sound_path}")
+    
+    def remove_sound(self):
+        """Entfernt den verknüpften Sound"""
+        self.sound_path = None
+        self.player.stop()
+        self.player.setMedia(QMediaContent())
+        print(f"Sound von Button '{self.text()}' entfernt")
+    
+    def mousePressEvent(self, event):
+        """Behandelt normale Klicks (links) und spielt Sound ab"""
+        if event.button() == Qt.LeftButton:
+            if self.sound_path:
+                self.play_sound()
+            else:
+                print(f"{self.text()} geklickt (kein Sound verknüpft)")
+        super().mousePressEvent(event)
 
 
 class SettingsDialog(QDialog):
@@ -31,7 +128,7 @@ class SettingsDialog(QDialog):
         layout.addRow("Kamera Index:", self.camera_index)
         
         # Lautstärke Einstellung
-        self.volume = QSlider(Qt.Orientation.Horizontal)
+        self.volume = QSlider(Qt.Horizontal)
         self.volume.setMinimum(0)
         self.volume.setMaximum(100)
         self.volume.setValue(50)
@@ -54,19 +151,19 @@ class SettingsDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Kamera GUI mit Werbung")
+        self.setWindowTitle("Moodystream")
         self.setGeometry(100, 100, 1400, 800)
         
         # Titelleiste schwarz machen (Plattformabhängig)
-        self.setStyleSheet("QMainWindow { background-color: #000000; }")
+        self.setStyleSheet("QMainWindow { background-color: #36454F; }")
         
         # Globales Stylesheet für die gesamte Anwendung
         self.setStyleSheet("""
             QMainWindow {
-                background-color: #000000;
+                background-color: #36454F;
             }
             QWidget {
-                background-color: #000000;
+                background-color: #36454F;
                 color: #FFFFFF;
                 font-family: Monaco, monospace;
             }
@@ -158,7 +255,7 @@ class MainWindow(QMainWindow):
         left_ads = QVBoxLayout()
         self.left_ad1 = QLabel()
         self.left_ad1.setStyleSheet("border: 2px solid #555555;")
-        self.left_ad1.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.left_ad1.setAlignment(Qt.AlignCenter)
         self.left_ad1.setMinimumSize(250, 300)
         self.left_ad1.setScaledContents(True)
         ad_pixmap1 = QPixmap("/Users/juliamoor/Desktop/MoodyStream/gui/ad_mockup.jpg")
@@ -166,7 +263,7 @@ class MainWindow(QMainWindow):
         
         self.left_ad2 = QLabel()
         self.left_ad2.setStyleSheet("border: 2px solid #555555;")
-        self.left_ad2.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.left_ad2.setAlignment(Qt.AlignCenter)
         self.left_ad2.setMinimumSize(250, 300)
         self.left_ad2.setScaledContents(True)
         ad_pixmap2 = QPixmap("/Users/juliamoor/Desktop/MoodyStream/gui/ad_mockup.jpg")
@@ -192,7 +289,7 @@ class MainWindow(QMainWindow):
         
         # Lautstärkeregler
         volume_label = QLabel("Lautstärke:")
-        self.volume_slider = QSlider(Qt.Orientation.Horizontal)
+        self.volume_slider = QSlider(Qt.Horizontal)
         self.volume_slider.setMinimum(0)
         self.volume_slider.setMaximum(100)
         self.volume_slider.setValue(50)
@@ -212,7 +309,7 @@ class MainWindow(QMainWindow):
         self.camera_label = QLabel()
         self.camera_label.setStyleSheet("background-color: black; border: 2px solid #555555;")
         self.camera_label.setFixedSize(800, 480)
-        self.camera_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.camera_label.setAlignment(Qt.AlignCenter)
         
         # Button Container Widget mit fester Breite (angepasst an neue Kamerabreite)
         button_container = QWidget()
@@ -224,21 +321,20 @@ class MainWindow(QMainWindow):
         button_grid.setSpacing(0)  # Keine Abstände zwischen Buttons
         button_grid.setContentsMargins(0, 0, 0, 0)  # Keine Ränder
         
-        # Buttons erstellen
-        self.btn_happy = QPushButton("Happy")
-        self.btn_schock = QPushButton("Schock")
-        self.btn_sad = QPushButton("Sad")
-        self.btn_angry = QPushButton("Angry")
-        self.btn_thumbs_up = QPushButton("Thumbs Up")
-        self.btn_thumbs_down = QPushButton("Thumbs Down")
+        # Buttons erstellen (jetzt mit SoundButton Klasse)
+        self.btn_happy = SoundButton("Happy")
+        self.btn_schock = SoundButton("Schock")
+        self.btn_sad = SoundButton("Sad")
+        self.btn_angry = SoundButton("Angry")
+        self.btn_thumbs_up = SoundButton("Thumbs Up")
+        self.btn_thumbs_down = SoundButton("Thumbs Down")
         
         # Liste aller Buttons für einheitliche Formatierung
         buttons = [self.btn_happy, self.btn_schock, self.btn_sad, 
                   self.btn_angry, self.btn_thumbs_up, self.btn_thumbs_down]
         
-        # Buttons Funktionen verbinden
+        # Buttons Mindesthöhe setzen
         for btn in buttons:
-            btn.clicked.connect(lambda checked, b=btn: print(f"{b.text()} geklickt"))
             btn.setMinimumHeight(140)
         
         # Buttons im Grid anordnen (2 Reihen x 3 Spalten)
@@ -257,15 +353,15 @@ class MainWindow(QMainWindow):
         
         # Alles zum Center Layout hinzufügen
         center_layout.addLayout(controls_layout)
-        center_layout.addWidget(self.camera_label, 0, Qt.AlignmentFlag.AlignHCenter)
-        center_layout.addWidget(button_container, 0, Qt.AlignmentFlag.AlignHCenter)
+        center_layout.addWidget(self.camera_label, 0, Qt.AlignHCenter)
+        center_layout.addWidget(button_container, 0, Qt.AlignHCenter)
         center_layout.addStretch()
 
         # Rechte Werbemockups (2 Stück übereinander)
         right_ads = QVBoxLayout()
         self.right_ad1 = QLabel()
         self.right_ad1.setStyleSheet("border: 2px solid #555555;")
-        self.right_ad1.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.right_ad1.setAlignment(Qt.AlignCenter)
         self.right_ad1.setMinimumSize(250, 300)
         self.right_ad1.setScaledContents(True)
         ad_pixmap3 = QPixmap("/Users/juliamoor/Desktop/MoodyStream/gui/ad_mockup.jpg")
@@ -273,7 +369,7 @@ class MainWindow(QMainWindow):
         
         self.right_ad2 = QLabel()
         self.right_ad2.setStyleSheet("border: 2px solid #555555;")
-        self.right_ad2.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.right_ad2.setAlignment(Qt.AlignCenter)
         self.right_ad2.setMinimumSize(250, 300)
         self.right_ad2.setScaledContents(True)
         ad_pixmap4 = QPixmap("/Users/juliamoor/Desktop/MoodyStream/gui/ad_mockup.jpg")
@@ -297,13 +393,14 @@ class MainWindow(QMainWindow):
         menubar = self.menuBar()
         settings_menu = menubar.addMenu("Optionen")
         
+        from PyQt5.QtWidgets import QAction
         settings_action = QAction("Einstellungen", self)
         settings_action.triggered.connect(self.open_settings)
         settings_menu.addAction(settings_action)
     
     def open_settings(self):
         dialog = SettingsDialog(self)
-        if dialog.exec():
+        if dialog.exec_():
             new_camera_index = dialog.get_camera_index()
             volume = dialog.get_volume()
             
@@ -338,11 +435,11 @@ class MainWindow(QMainWindow):
             bytes_per_line = ch * w
             
             # QImage erstellen und anzeigen
-            qt_image = QImage(frame.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
+            qt_image = QImage(frame.data, w, h, bytes_per_line, QImage.Format_RGB888)
             pixmap = QPixmap.fromImage(qt_image)
             scaled_pixmap = pixmap.scaled(self.camera_label.size(), 
-                                         Qt.AspectRatioMode.KeepAspectRatio,
-                                         Qt.TransformationMode.SmoothTransformation)
+                                         Qt.KeepAspectRatio,
+                                         Qt.SmoothTransformation)
             self.camera_label.setPixmap(scaled_pixmap)
     
     def closeEvent(self, event):
@@ -354,4 +451,4 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = MainWindow()
     window.show()
-    sys.exit(app.exec())
+    sys.exit(app.exec_())
