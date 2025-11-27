@@ -1,7 +1,7 @@
 import numpy as np
 import joblib
 
-model = joblib.load("svm_gesture_model.pkl")
+model = joblib.load("detection/detectors/gestures/svm_gesture_models.pkl")
 
 def extract_features(hand_landmarks):
     points = np.array([[lm.x, lm.y, lm.z] for lm in hand_landmarks.landmark], dtype=np.float32)
