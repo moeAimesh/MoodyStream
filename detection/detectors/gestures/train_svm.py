@@ -7,7 +7,7 @@ from sklearn.metrics import classification_report
 import joblib
 
 def main():
-    data = np.load("gesture_dataset.npz", allow_pickle=True)
+    data = np.load(r"C:\GitHub\MoodyStream\detection\detectors\gestures\gesture_dataset.npz", allow_pickle=True)
     X = data["X"]  # Form: (N, 63)
     y = data["y"]  # Form: (N,)
 
@@ -34,7 +34,7 @@ def main():
     print(classification_report(y_test, y_pred))
 
     # Modell speichern
-    joblib.dump(clf, "svm_gesture_model.pkl")
+    joblib.dump(clf, "svm_gesture_models.pkl")
 
 if __name__ == "__main__":
     main()
