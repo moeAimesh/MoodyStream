@@ -1,10 +1,10 @@
-"""Aufgabe: Fenster mit Tabs: Setup, Live, Einstellungen.
+"""Task: Window with tabs: Setup, Live, Settings.
 
-Eingaben: Events aus Kamera/Audio.
+Inputs: Events from Camera/Audio.
 
-Ausgaben: visuelles Feedback, Buttons („Setup erneut starten", „Profil wechseln").
+Outputs: Visual feedback, Buttons ("Restart Setup", "Switch Profile").
 
-Tipp: GUI in eigenem Thread oder async."""
+Tip: GUI in separate thread or async."""
 import sys
 import cv2
 import webbrowser
@@ -20,7 +20,7 @@ from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
 
 
 class SoundButton(QPushButton):
-    """Erweiterter Button mit Sound-Funktionalität"""
+    """Extended Button with Sound Functionality"""
     def __init__(self, text, parent=None):
         super().__init__(text, parent)
         self.sound_path = None
@@ -29,21 +29,21 @@ class SoundButton(QPushButton):
         self.customContextMenuRequested.connect(self.show_context_menu)
     
     def show_context_menu(self, position):
-        """Zeigt Kontextmenü beim Rechtsklick"""
+        """Shows context menu on right click"""
         menu = QMenu()
         
-        # Optionen im Kontextmenü
-        search_action = menu.addAction("Sound im Web suchen")
-        load_action = menu.addAction("Sound-Datei laden")
+        # options in context menu
+        search_action = menu.addAction("Search sound on web")
+        load_action = menu.addAction("Load sound file")
         menu.addSeparator()
         
         if self.sound_path:
-            play_action = menu.addAction("Sound abspielen")
-            remove_action = menu.addAction("Sound entfernen")
-            info_action = menu.addAction(f"Aktueller Sound: {self.sound_path.split('/')[-1]}")
+            play_action = menu.addAction("Play sound")
+            remove_action = menu.addAction("Remove sound")
+            info_action = menu.addAction(f"Current sound: {self.sound_path.split('/')[-1]}")
             info_action.setEnabled(False)
         
-        # Aktion ausführen
+        # execute action
         action = menu.exec_(self.mapToGlobal(position))
         
         if action == search_action:
@@ -56,29 +56,29 @@ class SoundButton(QPushButton):
             self.remove_sound()
     
     def open_sound_search(self):
-        """Öffnet MyInstants im Browser"""
-        url = "https://www.myinstants.com/de/search/?name=MEME"
+        """Opens MyInstants in browser"""
+        url = "https://www.myinstants.com/en/search/?name=MEME"
         webbrowser.open(url)
         
-        # Info-Dialog anzeigen
+        # show info dialog
         QMessageBox.information(
             self,
-            "Sound-Suche",
-            "Browser wurde geöffnet!\n\n"
-            "So verknüpfst du einen Sound:\n"
-            "1. Suche einen Sound auf MyInstants\n"
-            "2. Lade den Sound runter (z.B. indem du ihn dir selber als Email schickst\n"
-            "3. Geh wieder auf unsere App und gehe mit einem Rechtsklick auf sound hinzufügen'\n"
-            "4. Wähle deinen eruntergeladenen Sound aus"
+            "Sound Search",
+            "Browser has been opened!\n\n"
+            "How to link a sound:\n"
+            "1. Search for a sound on MyInstants\n"
+            "2. Download the sound (e.g., by emailing it to yourself)\n"
+            "3. Return to our app and right-click on 'add sound'\n"
+            "4. Select your downloaded sound"
         )
     
     def load_sound_file(self):
-        """Lädt eine Sound-Datei vom Computer"""
+        """Loads a sound file from computer"""
         file_path, _ = QFileDialog.getOpenFileName(
             self,
-            "Sound-Datei auswählen",
+            "Select sound file",
             "",
-            "Audio-Dateien (*.mp3 *.wav *.ogg);;Alle Dateien (*.*)"
+            "Audio files (*.mp3 *.wav *.ogg);;All files (*.*)"
         )
         
         if file_path:
@@ -86,66 +86,68 @@ class SoundButton(QPushButton):
             url = QUrl.fromLocalFile(file_path)
             self.player.setMedia(QMediaContent(url))
             self.player.setVolume(100)
-            print(f"Sound '{file_path}' wurde Button '{self.text()}' zugewiesen")
     
     def play_sound(self):
-        """Spielt den verknüpften Sound ab"""
+        """Plays the linked sound"""
         if self.sound_path and self.player:
-            self.player.stop()  # stoppt vorherigen Sound falls noch am Laufen
+            self.player.stop()
             self.player.play()
-            print(f"Sound wird abgespielt: {self.sound_path}")
-    
+
     def remove_sound(self):
-        """Entfernt den verknüpften Sound"""
+        """Removes the linked sound"""
         self.sound_path = None
         self.player.stop()
         self.player.setMedia(QMediaContent())
-        print(f"Sound von Button '{self.text()}' entfernt")
     
     def mousePressEvent(self, event):
-        """Behandelt normale Klicks (links) und spielt Sound ab"""
+        """Handles normal clicks (left) and plays sound"""
         if event.button() == Qt.LeftButton:
             if self.sound_path:
                 self.play_sound()
-            else:
-                print(f"{self.text()} geklickt (kein Sound verknüpft)")
         super().mousePressEvent(event)
 
 
 class SettingsDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Einstellungen")
+        self.setWindowTitle("Settings")
         self.setMinimumWidth(300)
+        self.parent_window = parent
         
         layout = QFormLayout()
         
-        # Kameraindex Einstellung
-        self.camera_index = QSpinBox()
-        self.camera_index.setMinimum(0)
-        self.camera_index.setMaximum(3)
-        self.camera_index.setValue(1)
-        layout.addRow("Kamera Index:", self.camera_index)
+        # camera selection dropdown
+        self.camera_combo = QComboBox()
+        for i in range(4):
+            self.camera_combo.addItem(f"Camera {i}", i)
+        if parent:
+            self.camera_combo.setCurrentIndex(parent.camera_index)
+        self.camera_combo.currentIndexChanged.connect(self.change_camera)
+        layout.addRow("Camera Index:", self.camera_combo)
         
-        # Lautstärke Einstellung
-        self.volume = QSlider(Qt.Horizontal)
-        self.volume.setMinimum(0)
-        self.volume.setMaximum(100)
-        self.volume.setValue(50)
-        layout.addRow("Lautstärke:", self.volume)
-        
-        # Übernehmen Button
-        apply_btn = QPushButton("Übernehmen")
-        apply_btn.clicked.connect(self.accept)
-        layout.addRow(apply_btn)
+        # restart setup button
+        self.restart_setup_btn = QPushButton("Restart Setup")
+        self.restart_setup_btn.clicked.connect(self.restart_setup)
+        layout.addRow(self.restart_setup_btn)
         
         self.setLayout(layout)
     
-    def get_camera_index(self):
-        return self.camera_index.value()
+    def change_camera(self, index):
+        """Kamera sofort wechseln"""
+        if self.parent_window:
+            new_camera_index = self.camera_combo.currentData()
+            if new_camera_index != self.parent_window.camera_index:
+                self.parent_window.cap.release()
+                self.parent_window.camera_index = new_camera_index
+                self.parent_window.cap = cv2.VideoCapture(new_camera_index)
     
-    def get_volume(self):
-        return self.volume.value()
+    def restart_setup(self):
+        """Setup erneut starten"""
+        QMessageBox.information(
+            self,
+            "Setup",
+            "Setup will be resstarted one Julia remembers to implement it."
+        )
 
 
 class MainWindow(QMainWindow):
@@ -154,117 +156,249 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Moodystream")
         self.setGeometry(100, 100, 1400, 800)
         
-        # Titelleiste schwarz machen (Plattformabhängig)
-        self.setStyleSheet("QMainWindow { background-color: #36454F; }")
-        
-        # Globales Stylesheet für die gesamte Anwendung
         self.setStyleSheet("""
+            /* Hauptfenster - Base Layer */
             QMainWindow {
-                background-color: #36454F;
+                background-color: #161618;
             }
+            
+            /* Standard Widgets - Base Layer */
             QWidget {
-                background-color: #36454F;
+                background-color: #161618;
                 color: #FFFFFF;
-                font-family: Monaco, monospace;
+                font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', Monaco, monospace;
             }
+            
+            /* Labels - Text auf Base Layer */
             QLabel {
                 color: #FFFFFF;
-                font-family: Monaco, monospace;
+                background-color: transparent;
             }
+            
+            /* Buttons - Elevated Layer mit Logo-Farbverlauf beim Hover */
             QPushButton {
-                background-color: #333333;
+                background-color: #212124;
                 color: #FFFFFF;
-                font-family: Monaco, monospace;
-                border: 1px solid #555555;
-                padding: 5px;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-size: 13px;
             }
             QPushButton:hover {
-                background-color: #555555;
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba(255, 107, 74, 0.3),
+                    stop:0.5 rgba(255, 59, 143, 0.3),
+                    stop:1 rgba(255, 105, 180, 0.3)
+                );
             }
             QPushButton:pressed {
-                background-color: #666666;
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba(255, 107, 74, 0.5),
+                    stop:0.5 rgba(255, 59, 143, 0.5),
+                    stop:1 rgba(255, 105, 180, 0.5)
+                );
             }
-            QComboBox {
-                background-color: #333333;
+            
+            /* Sound Buttons mit Logo-Farbverlauf beim Hover */
+            SoundButton {
+                background-color: #212124;
                 color: #FFFFFF;
-                font-family: Monaco, monospace;
-                border: 1px solid #555555;
-                padding: 5px;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-size: 13px;
+            }
+            SoundButton:hover {
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba(255, 107, 74, 0.3),
+                    stop:0.5 rgba(255, 59, 143, 0.3),
+                    stop:1 rgba(255, 105, 180, 0.3)
+                );
+            }
+            SoundButton:pressed {
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba(255, 107, 74, 0.5),
+                    stop:0.5 rgba(255, 59, 143, 0.5),
+                    stop:1 rgba(255, 105, 180, 0.5)
+                );
+            }
+            
+            /* ComboBox - Elevated Layer mit Farbverlauf beim Hover */
+            QComboBox {
+                background-color: #212124;
+                color: #FFFFFF;
+                border: none;
+                border-radius: 6px;
+                padding: 6px 12px;
+                font-size: 13px;
             }
             QComboBox:hover {
-                background-color: #555555;
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba(255, 107, 74, 0.3),
+                    stop:0.5 rgba(255, 59, 143, 0.3),
+                    stop:1 rgba(255, 105, 180, 0.3)
+                );
             }
             QComboBox::drop-down {
                 border: none;
+                width: 20px;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                border-top: 5px solid #FFFFFF;
+                margin-right: 8px;
             }
             QComboBox QAbstractItemView {
-                background-color: #333333;
+                background-color: #212124;
                 color: #FFFFFF;
-                selection-background-color: #555555;
+                selection-background-color: rgba(255, 107, 74, 0.3);
+                border: 1px solid #000000;
+                border-radius: 6px;
+                padding: 4px;
+                outline: none;
             }
+            
+            /* Slider - Custom Apple Style */
             QSlider::groove:horizontal {
-                background-color: #333333;
-                height: 8px;
-                border-radius: 4px;
+                background-color: #212124;
+                height: 4px;
+                border-radius: 2px;
             }
             QSlider::handle:horizontal {
                 background-color: #FFFFFF;
-                width: 16px;
-                margin: -4px 0;
-                border-radius: 8px;
+                width: 18px;
+                height: 18px;
+                margin: -7px 0;
+                border-radius: 9px;
+                border: none;
             }
             QSlider::handle:horizontal:hover {
-                background-color: #CCCCCC;
+                background-color: #818181;
             }
+            
+            /* SpinBox - Elevated Layer */
+            QSpinBox {
+                background-color: #212124;
+                color: #FFFFFF;
+                border: none;
+                border-radius: 6px;
+                padding: 6px 12px;
+                font-size: 13px;
+            }
+            QSpinBox:hover {
+                background-color: #818181;
+            }
+            QSpinBox::up-button, QSpinBox::down-button {
+                background-color: transparent;
+                border: none;
+                width: 16px;
+            }
+            QSpinBox::up-arrow {
+                image: none;
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                border-bottom: 5px solid #FFFFFF;
+            }
+            QSpinBox::down-arrow {
+                image: none;
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                border-top: 5px solid #FFFFFF;
+            }
+            
+            /* MenuBar - Darkest Layer */
             QMenuBar {
                 background-color: #000000;
                 color: #FFFFFF;
-                font-family: Monaco, monospace;
+                border: none;
+                padding: 4px;
+                font-size: 13px;
             }
             QMenuBar::item {
-                background-color: #000000;
-                color: #FFFFFF;
+                background-color: transparent;
+                padding: 4px 12px;
+                border-radius: 4px;
             }
             QMenuBar::item:selected {
-                background-color: #333333;
+                background-color: #212124;
             }
+            QMenuBar::item:pressed {
+                background-color: #818181;
+            }
+            
+            /* Menu Dropdown */
             QMenu {
-                background-color: #000000;
+                background-color: #212124;
                 color: #FFFFFF;
-                font-family: Monaco, monospace;
-                border: 1px solid #555555;
+                border: 1px solid #000000;
+                border-radius: 8px;
+                padding: 4px;
+            }
+            QMenu::item {
+                padding: 6px 24px 6px 12px;
+                border-radius: 4px;
             }
             QMenu::item:selected {
-                background-color: #333333;
+                background-color: #818181;
+            }
+            QMenu::separator {
+                height: 1px;
+                background-color: #000000;
+                margin: 4px 8px;
+            }
+            
+            /* MessageBox/Dialog */
+            QDialog {
+                background-color: #161618;
+            }
+            QMessageBox {
+                background-color: #161618;
+            }
+            QMessageBox QLabel {
+                color: #FFFFFF;
+            }
+            
+            /* FileDialog */
+            QFileDialog {
+                background-color: #161618;
+                color: #FFFFFF;
             }
         """)
         
-        # Kamera initialisieren
-        self.camera_index = 0
+        # initialising camera
+        self.camera_index = 1
         self.cap = cv2.VideoCapture(self.camera_index)
+        self.streaming = False
         
-        # Menüleiste erstellen
+        # menu
         self.create_menu()
         
-        # Hauptwidget und Layout
+        # main widget and layout
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QHBoxLayout(central_widget)
         
-        # Linke Werbemockups (2 Stück übereinander)
+        # left ad mockups (2 stacked)
         left_ads = QVBoxLayout()
         self.left_ad1 = QLabel()
-        self.left_ad1.setStyleSheet("border: 2px solid #555555;")
+        self.left_ad1.setStyleSheet("border: 1px solid #212124; border-radius: 8px;")
         self.left_ad1.setAlignment(Qt.AlignCenter)
-        self.left_ad1.setMinimumSize(250, 300)
+        self.left_ad1.setMinimumSize(220, 280)  
         self.left_ad1.setScaledContents(True)
         ad_pixmap1 = QPixmap("/Users/juliamoor/Desktop/MoodyStream/gui/ad_mockup.jpg")
         self.left_ad1.setPixmap(ad_pixmap1)
         
         self.left_ad2 = QLabel()
-        self.left_ad2.setStyleSheet("border: 2px solid #555555;")
+        self.left_ad2.setStyleSheet("border: 1px solid #212124; border-radius: 8px;")
         self.left_ad2.setAlignment(Qt.AlignCenter)
-        self.left_ad2.setMinimumSize(250, 300)
+        self.left_ad2.setMinimumSize(220, 280) 
         self.left_ad2.setScaledContents(True)
         ad_pixmap2 = QPixmap("/Users/juliamoor/Desktop/MoodyStream/gui/ad_mockup.jpg")
         self.left_ad2.setPixmap(ad_pixmap2)
@@ -273,104 +407,140 @@ class MainWindow(QMainWindow):
         left_ads.addWidget(self.left_ad2)
         left_ads.addStretch()
         
-        # Mittlerer Bereich (Kamera + Controls + Buttons)
+        # middle area (Camera + Controls + Buttons)
         center_layout = QVBoxLayout()
         
-        # Controls über der Kamera (Kameraauswahl und Lautstärke)
+        # controls center on top of camera
         controls_layout = QHBoxLayout()
         
-        # Kamera-Auswahl Dropdown
-        camera_select_label = QLabel("Kamera:")
-        self.camera_combo = QComboBox()
-        # Kameras 0-5 zur Auswahl hinzufügen
-        for i in range(6):
-            self.camera_combo.addItem(f"Kamera {i}", i)
-        self.camera_combo.currentIndexChanged.connect(self.change_camera)
+        # Logo
+        logo_label = QLabel()
+        logo_label.setStyleSheet("background-color: transparent; border: none;")
+        logo_label.setAlignment(Qt.AlignCenter)
+        logo_label.setFixedSize(50, 50) 
+        logo_label.setScaledContents(True)
         
-        # Lautstärkeregler
-        volume_label = QLabel("Lautstärke:")
+        logo_path = "/Users/juliamoor/Desktop/MoodyStream/gui/moody_logo.jpg"
+        if os.path.exists(logo_path):
+            logo_pixmap = QPixmap(logo_path)
+            logo_label.setPixmap(logo_pixmap)
+        
+        controls_layout.addWidget(logo_label)
+        controls_layout.addSpacing(20)
+        
+        # volume control
+        volume_label = QLabel("Volume:")
         self.volume_slider = QSlider(Qt.Horizontal)
         self.volume_slider.setMinimum(0)
         self.volume_slider.setMaximum(100)
         self.volume_slider.setValue(50)
-        self.volume_slider.setMaximumWidth(200)
+        self.volume_slider.setMaximumWidth(100)
         self.volume_slider.valueChanged.connect(self.volume_changed)
         self.volume_value_label = QLabel("50%")
         
-        controls_layout.addWidget(camera_select_label)
-        controls_layout.addWidget(self.camera_combo)
-        controls_layout.addSpacing(20)
         controls_layout.addWidget(volume_label)
         controls_layout.addWidget(self.volume_slider)
         controls_layout.addWidget(self.volume_value_label)
+        controls_layout.addSpacing(20)
+        
+        # start stream button
+        self.start_stream_button = QPushButton("Start Stream")
+        self.start_stream_button.clicked.connect(self.start_stream)
+        self.start_stream_button.setFixedWidth(130)
+        controls_layout.addWidget(self.start_stream_button)
+        
+        # end stream button
+        self.end_stream_button = QPushButton("End Stream")
+        self.end_stream_button.clicked.connect(self.end_stream)
+        self.end_stream_button.setFixedWidth(130)
+        self.end_stream_button.setEnabled(False)
+        controls_layout.addWidget(self.end_stream_button)
+        
+        # settings button
+        self.settings_button = QPushButton("Settings")
+        self.settings_button.clicked.connect(self.open_settings)
+        self.settings_button.setFixedWidth(130)
+        controls_layout.addWidget(self.settings_button)
+        
         controls_layout.addStretch()
         
-        # Kamera-Display (breiter gemacht)
+        # Live Icon
+        self.live_icon_label = QLabel()
+        self.live_icon_label.setStyleSheet("background-color: transparent; border: none;")
+        self.live_icon_label.setAlignment(Qt.AlignCenter)
+        self.live_icon_label.setFixedSize(70, 40)
+        self.live_icon_label.setScaledContents(True)
+        
+        live_icon_path = "/Users/juliamoor/Desktop/MoodyStream/gui/live_icon.png"
+        if os.path.exists(live_icon_path):
+            live_icon_pixmap = QPixmap(live_icon_path)
+            self.live_icon_label.setPixmap(live_icon_pixmap)
+        
+        self.live_icon_label.setVisible(False)  # initially hidden
+        
+        controls_layout.addWidget(self.live_icon_label)
+        
+        # camera display
         self.camera_label = QLabel()
-        self.camera_label.setStyleSheet("background-color: black; border: 2px solid #555555;")
-        self.camera_label.setFixedSize(800, 480)
+        self.camera_label.setStyleSheet("background-color: #000000; border: 1px solid #212124; border-radius: 8px;")
+        self.camera_label.setFixedSize(720, 405) #16:9 Format
         self.camera_label.setAlignment(Qt.AlignCenter)
         
-        # Button Container Widget mit fester Breite (angepasst an neue Kamerabreite)
+        # button container widget
         button_container = QWidget()
-        button_container.setFixedWidth(800)
-        button_container.setFixedHeight(280)
+        button_container.setFixedWidth(720)
+        button_container.setFixedHeight(240)
         
-        # 6 quadratische Buttons unter der Kamera in 2 Reihen
         button_grid = QGridLayout(button_container)
-        button_grid.setSpacing(0)  # Keine Abstände zwischen Buttons
-        button_grid.setContentsMargins(0, 0, 0, 0)  # Keine Ränder
+        button_grid.setSpacing(4)
+        button_grid.setContentsMargins(0, 0, 0, 0)
         
-        # Buttons erstellen (jetzt mit SoundButton Klasse)
+        # creating buttons
         self.btn_happy = SoundButton("Happy")
-        self.btn_schock = SoundButton("Schock")
+        self.btn_surprise = SoundButton("Surprise")
         self.btn_sad = SoundButton("Sad")
-        self.btn_angry = SoundButton("Angry")
-        self.btn_thumbs_up = SoundButton("Thumbs Up")
-        self.btn_thumbs_down = SoundButton("Thumbs Down")
+        self.btn_fear = SoundButton("Fear")
         
-        # Liste aller Buttons für einheitliche Formatierung
-        buttons = [self.btn_happy, self.btn_schock, self.btn_sad, 
-                  self.btn_angry, self.btn_thumbs_up, self.btn_thumbs_down]
+        buttons = [self.btn_happy, self.btn_surprise, self.btn_sad, 
+                  self.btn_fear]
         
-        # Buttons Mindesthöhe setzen
         for btn in buttons:
-            btn.setMinimumHeight(140)
+            btn.setMinimumHeight(116) 
         
-        # Buttons im Grid anordnen (2 Reihen x 3 Spalten)
+        # placing buttons in grid in container widget
         button_grid.addWidget(self.btn_happy, 0, 0)
-        button_grid.addWidget(self.btn_schock, 0, 1)
-        button_grid.addWidget(self.btn_sad, 0, 2)
-        button_grid.addWidget(self.btn_angry, 1, 0)
-        button_grid.addWidget(self.btn_thumbs_up, 1, 1)
-        button_grid.addWidget(self.btn_thumbs_down, 1, 2)
+        button_grid.addWidget(self.btn_surprise, 0, 1)
+        button_grid.addWidget(self.btn_sad, 1, 0)
+        button_grid.addWidget(self.btn_fear, 1, 1)
         
-        # Grid-Spalten gleichmäßig verteilen
-        for i in range(3):
+        # making grid rows and columns even
+        for i in range(2):
             button_grid.setColumnStretch(i, 1)
         for i in range(2):
             button_grid.setRowStretch(i, 1)
         
-        # Alles zum Center Layout hinzufügen
+        # adding everything into the center layoyut
         center_layout.addLayout(controls_layout)
+        center_layout.addSpacing(8)
         center_layout.addWidget(self.camera_label, 0, Qt.AlignHCenter)
+        center_layout.addSpacing(8)
         center_layout.addWidget(button_container, 0, Qt.AlignHCenter)
         center_layout.addStretch()
 
-        # Rechte Werbemockups (2 Stück übereinander)
+        # right ads (stacked over each other)
         right_ads = QVBoxLayout()
         self.right_ad1 = QLabel()
-        self.right_ad1.setStyleSheet("border: 2px solid #555555;")
+        self.right_ad1.setStyleSheet("border: 1px solid #212124; border-radius: 8px;")
         self.right_ad1.setAlignment(Qt.AlignCenter)
-        self.right_ad1.setMinimumSize(250, 300)
+        self.right_ad1.setMinimumSize(220, 280)
         self.right_ad1.setScaledContents(True)
         ad_pixmap3 = QPixmap("/Users/juliamoor/Desktop/MoodyStream/gui/ad_mockup.jpg")
         self.right_ad1.setPixmap(ad_pixmap3)
         
         self.right_ad2 = QLabel()
-        self.right_ad2.setStyleSheet("border: 2px solid #555555;")
+        self.right_ad2.setStyleSheet("border: 1px solid #212124; border-radius: 8px;")
         self.right_ad2.setAlignment(Qt.AlignCenter)
-        self.right_ad2.setMinimumSize(250, 300)
+        self.right_ad2.setMinimumSize(220, 280)
         self.right_ad2.setScaledContents(True)
         ad_pixmap4 = QPixmap("/Users/juliamoor/Desktop/MoodyStream/gui/ad_mockup.jpg")
         self.right_ad2.setPixmap(ad_pixmap4)
@@ -379,62 +549,54 @@ class MainWindow(QMainWindow):
         right_ads.addWidget(self.right_ad2)
         right_ads.addStretch()
     
-        # Alles zum Hauptlayout hinzufügen
+        # adding everything to center layout
         main_layout.addLayout(left_ads, 1)
         main_layout.addLayout(center_layout, 3)
         main_layout.addLayout(right_ads, 1)
         
-        # Timer für Kamera-Updates
+        # timer for frame updates
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_frame)
-        self.timer.start(30)  # ~30 FPS
+        self.timer.start(30)
     
     def create_menu(self):
         menubar = self.menuBar()
-        settings_menu = menubar.addMenu("Optionen")
+        settings_menu = menubar.addMenu("Options")
         
         from PyQt5.QtWidgets import QAction
-        settings_action = QAction("Einstellungen", self)
+        settings_action = QAction("Settings", self)
         settings_action.triggered.connect(self.open_settings)
         settings_menu.addAction(settings_action)
     
     def open_settings(self):
         dialog = SettingsDialog(self)
-        if dialog.exec_():
-            new_camera_index = dialog.get_camera_index()
-            volume = dialog.get_volume()
-            
-            # Kamera neu initialisieren falls Index geändert wurde
-            if new_camera_index != self.camera_index:
-                self.cap.release()
-                self.camera_index = new_camera_index
-                self.cap = cv2.VideoCapture(self.camera_index)
-            
-            print(f"Neue Einstellungen: Kamera={new_camera_index}, Lautstärke={volume}")
+        dialog.exec_()
     
-    def change_camera(self, index):
-        """Kamera wechseln basierend auf Dropdown-Auswahl"""
-        new_camera_index = self.camera_combo.currentData()
-        if new_camera_index != self.camera_index:
-            self.cap.release()
-            self.camera_index = new_camera_index
-            self.cap = cv2.VideoCapture(self.camera_index)
-            print(f"Kamera gewechselt zu Index: {new_camera_index}")
+    def start_stream(self):
+        """Stream starten"""
+        self.streaming = True
+        self.start_stream_button.setEnabled(False)
+        self.end_stream_button.setEnabled(True)
+        self.live_icon_label.setVisible(True)
+    
+    def end_stream(self):
+        """Stream beenden"""
+        self.streaming = False
+        self.start_stream_button.setEnabled(True)
+        self.end_stream_button.setEnabled(False)
+        self.live_icon_label.setVisible(False)  # hide live icon
     
     def volume_changed(self, value):
         """Lautstärke aktualisieren"""
         self.volume_value_label.setText(f"{value}%")
-        print(f"Lautstärke: {value}%")
     
     def update_frame(self):
         ret, frame = self.cap.read()
         if ret:
-            # Frame von BGR (OpenCV) zu RGB konvertieren
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             h, w, ch = frame.shape
             bytes_per_line = ch * w
             
-            # QImage erstellen und anzeigen
             qt_image = QImage(frame.data, w, h, bytes_per_line, QImage.Format_RGB888)
             pixmap = QPixmap.fromImage(qt_image)
             scaled_pixmap = pixmap.scaled(self.camera_label.size(), 
