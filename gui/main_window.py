@@ -13,7 +13,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QPushButton, QLabel, QDialog, 
                              QSpinBox, QSlider, QFormLayout, QMenuBar, QMenu,
                              QComboBox, QGridLayout, QLineEdit, QFileDialog,
-                             QMessageBox)
+                             QMessageBox, QScrollArea)
 from PyQt5.QtCore import QTimer, Qt, QUrl
 from PyQt5.QtGui import QImage, QPixmap, QCursor, QIcon
 from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
@@ -30,7 +30,7 @@ class SoundButton(QPushButton):
     
     def show_context_menu(self, position):
         """Shows context menu on right click"""
-        menu = QMenu()
+        menu = QMenu(self)  # Parent setzen damit Styling vererbt wird
         
         # options in context menu
         search_action = menu.addAction("Search sound on web")
@@ -357,18 +357,77 @@ class MainWindow(QMainWindow):
             /* MessageBox/Dialog */
             QDialog {
                 background-color: #161618;
+                color: #FFFFFF;
             }
             QMessageBox {
                 background-color: #161618;
+                color: #FFFFFF;
             }
             QMessageBox QLabel {
                 color: #FFFFFF;
+            }
+            QMessageBox QPushButton {
+                min-width: 70px;
             }
             
             /* FileDialog */
             QFileDialog {
                 background-color: #161618;
                 color: #FFFFFF;
+            }
+            QFileDialog QWidget {
+                background-color: #161618;
+                color: #FFFFFF;
+            }
+            QFileDialog QPushButton {
+                background-color: #212124;
+                color: #FFFFFF;
+            }
+            QFileDialog QTreeView {
+                background-color: #161618;
+                color: #FFFFFF;
+                border: 1px solid #212124;
+            }
+            QFileDialog QListView {
+                background-color: #161618;
+                color: #FFFFFF;
+                border: 1px solid #212124;
+            }
+            QFileDialog QLineEdit {
+                background-color: #212124;
+                color: #FFFFFF;
+                border: 1px solid #000000;
+                border-radius: 4px;
+                padding: 4px;
+            }
+            QFileDialog QComboBox {
+                background-color: #212124;
+                color: #FFFFFF;
+            }
+            
+            /* ScrollArea */
+            QScrollArea {
+                background-color: transparent;
+                border: none;
+            }
+            QScrollBar:vertical {
+                background-color: #161618;
+                width: 12px;
+                border-radius: 6px;
+            }
+            QScrollBar::handle:vertical {
+                background-color: #212124;
+                border-radius: 6px;
+                min-height: 20px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background-color: #818181;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+                background: none;
             }
         """)
         
@@ -486,11 +545,8 @@ class MainWindow(QMainWindow):
         self.camera_label.setFixedSize(720, 405) #16:9 Format
         self.camera_label.setAlignment(Qt.AlignCenter)
         
-        # button container widget
+        # container widget for buttons
         button_container = QWidget()
-        button_container.setFixedWidth(720)
-        button_container.setFixedHeight(240)
-        
         button_grid = QGridLayout(button_container)
         button_grid.setSpacing(4)
         button_grid.setContentsMargins(0, 0, 0, 0)
@@ -500,26 +556,37 @@ class MainWindow(QMainWindow):
         self.btn_surprise = SoundButton("Surprise")
         self.btn_sad = SoundButton("Sad")
         self.btn_fear = SoundButton("Fear")
+        self.btn_thumbs_up = SoundButton("Thumbs up")
+        self.btn_thumbs_down = SoundButton("Thumbs down")
+        self.btn_peace = SoundButton("Peace")
+        self.btn_middle_finger = SoundButton("Middelfinger")
+        self.btn_open_hand = SoundButton("Open Hand")
         
-        buttons = [self.btn_happy, self.btn_surprise, self.btn_sad, 
-                  self.btn_fear]
+        buttons = [
+            self.btn_happy, self.btn_surprise, self.btn_sad,
+            self.btn_fear, self.btn_thumbs_up, self.btn_thumbs_down,
+            self.btn_peace, self.btn_middle_finger, self.btn_open_hand
+        ]
         
+        # buttonsize
         for btn in buttons:
-            btn.setMinimumHeight(116) 
+            btn.setMinimumHeight(75)
+            btn.setMinimumWidth(237)
         
-        # placing buttons in grid in container widget
-        button_grid.addWidget(self.btn_happy, 0, 0)
-        button_grid.addWidget(self.btn_surprise, 0, 1)
-        button_grid.addWidget(self.btn_sad, 1, 0)
-        button_grid.addWidget(self.btn_fear, 1, 1)
+        # buttons in 3x3 grid
+        row = 0
+        col = 0
+        for btn in buttons:
+            button_grid.addWidget(btn, row, col)
+            col += 1
+            if col >= 3:
+                col = 0
+                row += 1
         
-        # making grid rows and columns even
-        for i in range(2):
+        for i in range(3):
             button_grid.setColumnStretch(i, 1)
-        for i in range(2):
-            button_grid.setRowStretch(i, 1)
         
-        # adding everything into the center layoyut
+        # adding everything into the center layout
         center_layout.addLayout(controls_layout)
         center_layout.addSpacing(8)
         center_layout.addWidget(self.camera_label, 0, Qt.AlignHCenter)
@@ -549,7 +616,7 @@ class MainWindow(QMainWindow):
         right_ads.addWidget(self.right_ad2)
         right_ads.addStretch()
     
-        # adding everything to center layout
+        # adding everything to main layout
         main_layout.addLayout(left_ads, 1)
         main_layout.addLayout(center_layout, 3)
         main_layout.addLayout(right_ads, 1)
@@ -584,7 +651,7 @@ class MainWindow(QMainWindow):
         self.streaming = False
         self.start_stream_button.setEnabled(True)
         self.end_stream_button.setEnabled(False)
-        self.live_icon_label.setVisible(False)  # hide live icon
+        self.live_icon_label.setVisible(False)
     
     def volume_changed(self, value):
         """Lautstärke aktualisieren"""
