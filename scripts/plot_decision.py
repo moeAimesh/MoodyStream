@@ -19,6 +19,7 @@ from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
 from sklearn.preprocessing import LabelEncoder
 from sklearn.svm import SVC
+from matplotlib.colors import ListedColormap
 
 import sys
 
@@ -321,8 +322,22 @@ def main():
 
     plot_type = args.plot_type.lower()
 
-    colors = plt.cm.get_cmap("tab10", len(label_encoder.classes_))
-    color_map = {label: colors(idx) for idx, label in enumerate(label_encoder.classes_)}
+    palette = [
+        "#FFD400",  # kräftiges Gelb
+        "#FF1493",  # kräftiges Pink
+        "#FF69B4",  # Rosa
+        "#FF1744",  # kräftiges Orange
+        "#FFEB99", # butteryellow
+    ]
+
+    # Jede Emotion bekommt eine dieser Farben (falls mehr Emotionen: Palette wird zyklisch verwendet)
+    color_map = {
+        label: palette[idx % len(palette)]
+        for idx, label in enumerate(label_encoder.classes_)
+    }
+
+    # Colormap für die Decision-Regions im 2D-Plot
+    custom_cmap = ListedColormap([color_map[label] for label in label_encoder.classes_])
 
     if plot_type == "2d":
         pca = PCA(n_components=2, random_state=42)
@@ -347,7 +362,14 @@ def main():
             Z = svc.predict(grid).reshape(xx.shape)
 
         plt.figure(figsize=(10, 8))
-        plt.contourf(xx, yy, Z, alpha=0.25, levels=len(label_encoder.classes_))
+        plt.contourf(
+            xx,
+            yy,
+            Z,
+            alpha=0.25,
+            levels=len(label_encoder.classes_),
+            cmap=custom_cmap,
+        )
         for emotion in label_encoder.classes_:
             mask = y == emotion
             plt.scatter(
