@@ -30,6 +30,7 @@ from detection.face_detection import detect_faces
 from detection.preprocessing import preprocess_face
 from detection.facemesh_features import extract_facemesh_features
 from setup.capture_feedback import analyze_capture_feedback
+from detection.emotion_heuristics import HeuristicThresholds, compute_thresholds_from_samples
 from utils.settings import REST_FACE_MODEL_PATH, TRAINED_MODEL
 
 EMOTION_PROFILES: List[Tuple[str, str]] = [
@@ -77,6 +78,7 @@ class RestFaceCalibrator:
         self.neutral_feature_mean = None
         self.computed_thresholds = {"gate": 0.60, "margin": 0.08}
         self.neutral_feature_mean = None
+        self.heuristic_thresholds: Optional[HeuristicThresholds] = None
 
     def record_emotions(
         self,
@@ -514,6 +516,10 @@ class RestFaceCalibrator:
             model_data["classifier"] = self.classifier_params
         if self.neutral_feature_mean is not None:
             model_data["neutral_feature_mean"] = self.neutral_feature_mean.tolist()
+        if self.heuristic_thresholds is None:
+            self._compute_heuristic_thresholds()
+        if self.heuristic_thresholds:
+            model_data["heuristic_thresholds"] = vars(self.heuristic_thresholds)
 
         self.model_path.parent.mkdir(parents=True, exist_ok=True)
         with self.model_path.open("w", encoding="utf-8") as f:
@@ -607,6 +613,22 @@ class RestFaceCalibrator:
         margin = float(max(0.05, std_noise * 1.5))
         self.computed_thresholds = {"gate": gate, "margin": margin}
         print(f"📊 Auto-Tuned Gate: {gate:.2f}, Margin: {margin:.2f}")
+
+    def _compute_heuristic_thresholds(self):
+        """Derive AU heuristics from captured AU feature vectors per emotion."""
+        feature_vectors = {
+            emotion: payload.get("features")
+            for emotion, payload in self.profiles.items()
+            if payload.get("features")
+        }
+        thresholds = compute_thresholds_from_samples(feature_vectors)
+        if thresholds:
+            self.heuristic_thresholds = thresholds
+            print(
+                "📊 AU-Heuristik kalibriert "
+                f"(surprise_min={thresholds.surprise_mouth_open_min:.2f}, "
+                f"happy_curve_max={thresholds.happy_mouth_curve_max:.2f})"
+            )
 
     def _warmup_session(self, cam, seconds: float = 2.0, show_preview: bool = True):
         """Read a few frames and run dummy DeepFace/FaceMesh to avoid cold-start drops."""

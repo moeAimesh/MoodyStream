@@ -11,7 +11,11 @@ import numpy as np
 from deepface import DeepFace
 
 from detection.detectors.Filters import EWMAFilter, HiddenMarkovModelFilter
-from detection.emotion_heuristics import EmotionHeuristicScorer
+from detection.emotion_heuristics import (
+    EmotionHeuristicScorer,
+    HeuristicThresholds,
+    compute_thresholds_from_samples,
+)
 from utils.settings import (
     EMOTION_FILTER,
     EMOTION_SWITCH_FRAMES,
@@ -171,6 +175,26 @@ class EmotionRecognition:
         with self.model_path.open("r", encoding="utf-8") as f:
             data = json.load(f)
 
+        heuristic_thresholds = None
+        heuristic_blob = data.get("heuristic_thresholds")
+        if heuristic_blob:
+            defaults = HeuristicThresholds()
+            heuristic_thresholds = HeuristicThresholds(
+                surprise_mouth_open_min=heuristic_blob.get(
+                    "surprise_mouth_open_min", defaults.surprise_mouth_open_min
+                ),
+                fear_lid_open_min=heuristic_blob.get("fear_lid_open_min", defaults.fear_lid_open_min),
+                sad_drop_min=heuristic_blob.get("sad_drop_min", defaults.sad_drop_min),
+                sad_avg_min=heuristic_blob.get("sad_avg_min", defaults.sad_avg_min),
+                sad_mouth_open_max=heuristic_blob.get("sad_mouth_open_max", defaults.sad_mouth_open_max),
+                happy_mouth_curve_max=heuristic_blob.get(
+                    "happy_mouth_curve_max", defaults.happy_mouth_curve_max
+                ),
+                happy_cheek_mean_min=heuristic_blob.get(
+                    "happy_cheek_mean_min", defaults.happy_cheek_mean_min
+                ),
+            )
+
         profiles = data.get("profiles")
         if profiles:
             for emotion, payload in profiles.items():
@@ -193,8 +217,19 @@ class EmotionRecognition:
         else:
             print("⚠️ Modell-Datei enthält keine nutzbaren Profile.")
 
+        if heuristic_thresholds is None and profiles:
+            feature_vectors = {
+                emotion: payload.get("feature_vectors")
+                for emotion, payload in profiles.items()
+                if isinstance(payload, dict) and payload.get("feature_vectors")
+            }
+            heuristic_thresholds = compute_thresholds_from_samples(feature_vectors)
+
         classifier = data.get("classifier")
         if not classifier:
+            if heuristic_thresholds:
+                self.heuristics.set_thresholds(heuristic_thresholds)
+                print("ƒo. AU-Heuristik aus Profil-Features kalibriert.")
             return
 
         self.classifier_feature_len = classifier.get("feature_length")
@@ -227,6 +262,10 @@ class EmotionRecognition:
             }
             self.classifier_dim = self.classifier["coef"].shape[1]
         print("✅ Personalisierter Klassifikator geladen.")
+        if heuristic_thresholds:
+            self.heuristics.set_thresholds(heuristic_thresholds)
+            print("✅ AU-Heuristik aus Profil-Features kalibriert.")
+
     def _predict_profile(self, vector):
         best_label = None
         best_score = None
