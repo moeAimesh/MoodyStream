@@ -1,4 +1,4 @@
-# 🧠 Moody – Real-Time Emotion & Gesture Recognition with Sound Reactions
+# Moody – Real-Time Emotion & Gesture Recognition with Sound Reactions
 
 Moody is an AI-powered system that detects facial emotions and hand gestures through a webcam — and reacts by playing custom sounds.  
 It is designed for streamers, creative projects, AI demos and real-time interactive applications.
@@ -12,7 +12,7 @@ Moody works in three phases:
 
 ---
 
-## 🚀 Features
+## Features
 
 - DeepFace-based emotion recognition  
 - MediaPipe-based gesture detection (e.g., thumbs up)  
@@ -21,7 +21,7 @@ Moody works in three phases:
 
 ---
 
-## 📦 Project Structure
+## Project Structure
 ```mermaid
 flowchart TD
     A[MoodyStream]
@@ -37,7 +37,7 @@ flowchart TD
 ```
 ---
 
-## 🛠️ How Moody Works
+## How Moody Works
 
 ### Setup Phase
 
@@ -49,9 +49,7 @@ Moody then computes:
 - a personalized neutral baseline  
 - emotion-specific statistics  
 - dynamic thresholds for distinguishing real expressions  
-- and a small personalized classifier
-
-All captured profiles and example snapshots are saved and used to make the live emotion detection more stable and accurate.
+- and a small personalized classifier (SVM with RBF Kernel)
 
 
 **Sound Setup:**  
@@ -61,7 +59,7 @@ The mapping is saved so Moody knows which sound to trigger.
 
 ---
 
-## 🎥 Detection Phase
+## Detection Phase
 
 Once setup is finished:
 
@@ -73,7 +71,7 @@ Once setup is finished:
 
 ---
 
-## 🔊 Sound System
+## Sound System
 
 All downloaded sound files are stored in:
 sounds/sound_cache/
@@ -83,7 +81,24 @@ sounds/sound_map.json
 
 ---
 
-## ▶️ How to Run
+## Virtual Camera Output
+
+Moody can optionally create a **virtual camera** as soon as the program starts.  
+This allows streamers and creators to use Moody as a live video source inside other applications.
+
+Once enabled, Moody appears in apps such as:
+
+- OBS Studio
+- Discord
+- Zoom
+- Twitch Studio
+- Any software that accepts webcam inputs
+
+This makes it possible to run your normal webcam feed through Moody’s real-time emotion & gesture detection, sound reactions, overlays, or any future visual output — and then simply select “Moody Virtual Camera” as the camera source in your streaming or video tool.
+
+---
+
+## How to Run
 
 Install dependencies:
 ```
@@ -97,16 +112,7 @@ The setup wizard will automatically start on first run.
 
 ---
 
-## 🧪 Developer Notes
-
-- Add new gestures in the detectors folder  
-- Change emotion/gesture priority in the recognition logic  
-- All path definitions and global settings are in the utils folder  
-- JSON data is safely handled by the json manager module  
-
----
-
-## 📚 Requirements
+## Requirements
 
 - Python 3.9+  
 - Webcam  
@@ -115,6 +121,6 @@ The setup wizard will automatically start on first run.
 
 ---
 
-## 📝 License
+## License
 
 MIT License (or define your own)
