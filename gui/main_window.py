@@ -1,9 +1,6 @@
 """Task: Window with tabs: Setup, Live, Settings.
-
 Inputs: Events from Camera/Audio.
-
 Outputs: Visual feedback, Buttons ("Restart Setup", "Switch Profile").
-
 Tip: GUI in separate thread or async."""
 import sys
 import cv2
@@ -18,7 +15,6 @@ from PyQt5.QtCore import QTimer, Qt, QUrl
 from PyQt5.QtGui import QImage, QPixmap, QCursor, QIcon
 from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
 
-
 class SoundButton(QPushButton):
     """Extended Button with Sound Functionality"""
     def __init__(self, text, parent=None):
@@ -30,7 +26,7 @@ class SoundButton(QPushButton):
     
     def show_context_menu(self, position):
         """Shows context menu on right click"""
-        menu = QMenu(self)  # Parent setzen damit Styling vererbt wird
+        menu = QMenu(self)
         
         # options in context menu
         search_action = menu.addAction("Search sound on web")
@@ -92,7 +88,7 @@ class SoundButton(QPushButton):
         if self.sound_path and self.player:
             self.player.stop()
             self.player.play()
-
+    
     def remove_sound(self):
         """Removes the linked sound"""
         self.sound_path = None
@@ -105,7 +101,6 @@ class SoundButton(QPushButton):
             if self.sound_path:
                 self.play_sound()
         super().mousePressEvent(event)
-
 
 class SettingsDialog(QDialog):
     def __init__(self, parent=None):
@@ -149,7 +144,6 @@ class SettingsDialog(QDialog):
             "Setup will be resstarted one Julia remembers to implement it."
         )
 
-
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -184,6 +178,7 @@ class MainWindow(QMainWindow):
                 padding: 8px 16px;
                 font-size: 13px;
             }
+            
             QPushButton:hover {
                 background: qlineargradient(
                     x1:0, y1:0, x2:1, y2:1,
@@ -192,6 +187,7 @@ class MainWindow(QMainWindow):
                     stop:1 rgba(255, 105, 180, 0.3)
                 );
             }
+            
             QPushButton:pressed {
                 background: qlineargradient(
                     x1:0, y1:0, x2:1, y2:1,
@@ -210,6 +206,7 @@ class MainWindow(QMainWindow):
                 padding: 8px 16px;
                 font-size: 13px;
             }
+            
             SoundButton:hover {
                 background: qlineargradient(
                     x1:0, y1:0, x2:1, y2:1,
@@ -218,6 +215,7 @@ class MainWindow(QMainWindow):
                     stop:1 rgba(255, 105, 180, 0.3)
                 );
             }
+            
             SoundButton:pressed {
                 background: qlineargradient(
                     x1:0, y1:0, x2:1, y2:1,
@@ -236,6 +234,7 @@ class MainWindow(QMainWindow):
                 padding: 6px 12px;
                 font-size: 13px;
             }
+            
             QComboBox:hover {
                 background: qlineargradient(
                     x1:0, y1:0, x2:1, y2:1,
@@ -244,10 +243,12 @@ class MainWindow(QMainWindow):
                     stop:1 rgba(255, 105, 180, 0.3)
                 );
             }
+            
             QComboBox::drop-down {
                 border: none;
                 width: 20px;
             }
+            
             QComboBox::down-arrow {
                 image: none;
                 border-left: 4px solid transparent;
@@ -255,6 +256,7 @@ class MainWindow(QMainWindow):
                 border-top: 5px solid #FFFFFF;
                 margin-right: 8px;
             }
+            
             QComboBox QAbstractItemView {
                 background-color: #212124;
                 color: #FFFFFF;
@@ -271,6 +273,7 @@ class MainWindow(QMainWindow):
                 height: 4px;
                 border-radius: 2px;
             }
+            
             QSlider::handle:horizontal {
                 background-color: #FFFFFF;
                 width: 18px;
@@ -279,6 +282,7 @@ class MainWindow(QMainWindow):
                 border-radius: 9px;
                 border: none;
             }
+            
             QSlider::handle:horizontal:hover {
                 background-color: #818181;
             }
@@ -292,20 +296,24 @@ class MainWindow(QMainWindow):
                 padding: 6px 12px;
                 font-size: 13px;
             }
+            
             QSpinBox:hover {
                 background-color: #818181;
             }
+            
             QSpinBox::up-button, QSpinBox::down-button {
                 background-color: transparent;
                 border: none;
                 width: 16px;
             }
+            
             QSpinBox::up-arrow {
                 image: none;
                 border-left: 4px solid transparent;
                 border-right: 4px solid transparent;
                 border-bottom: 5px solid #FFFFFF;
             }
+            
             QSpinBox::down-arrow {
                 image: none;
                 border-left: 4px solid transparent;
@@ -321,14 +329,17 @@ class MainWindow(QMainWindow):
                 padding: 4px;
                 font-size: 13px;
             }
+            
             QMenuBar::item {
                 background-color: transparent;
                 padding: 4px 12px;
                 border-radius: 4px;
             }
+            
             QMenuBar::item:selected {
                 background-color: #212124;
             }
+            
             QMenuBar::item:pressed {
                 background-color: #818181;
             }
@@ -341,13 +352,16 @@ class MainWindow(QMainWindow):
                 border-radius: 8px;
                 padding: 4px;
             }
+            
             QMenu::item {
                 padding: 6px 24px 6px 12px;
                 border-radius: 4px;
             }
+            
             QMenu::item:selected {
                 background-color: #818181;
             }
+            
             QMenu::separator {
                 height: 1px;
                 background-color: #000000;
@@ -359,13 +373,16 @@ class MainWindow(QMainWindow):
                 background-color: #161618;
                 color: #FFFFFF;
             }
+            
             QMessageBox {
                 background-color: #161618;
                 color: #FFFFFF;
             }
+            
             QMessageBox QLabel {
                 color: #FFFFFF;
             }
+            
             QMessageBox QPushButton {
                 min-width: 70px;
             }
@@ -375,24 +392,29 @@ class MainWindow(QMainWindow):
                 background-color: #161618;
                 color: #FFFFFF;
             }
+            
             QFileDialog QWidget {
                 background-color: #161618;
                 color: #FFFFFF;
             }
+            
             QFileDialog QPushButton {
                 background-color: #212124;
                 color: #FFFFFF;
             }
+            
             QFileDialog QTreeView {
                 background-color: #161618;
                 color: #FFFFFF;
                 border: 1px solid #212124;
             }
+            
             QFileDialog QListView {
                 background-color: #161618;
                 color: #FFFFFF;
                 border: 1px solid #212124;
             }
+            
             QFileDialog QLineEdit {
                 background-color: #212124;
                 color: #FFFFFF;
@@ -400,6 +422,7 @@ class MainWindow(QMainWindow):
                 border-radius: 4px;
                 padding: 4px;
             }
+            
             QFileDialog QComboBox {
                 background-color: #212124;
                 color: #FFFFFF;
@@ -410,22 +433,27 @@ class MainWindow(QMainWindow):
                 background-color: transparent;
                 border: none;
             }
+            
             QScrollBar:vertical {
                 background-color: #161618;
                 width: 12px;
                 border-radius: 6px;
             }
+            
             QScrollBar::handle:vertical {
                 background-color: #212124;
                 border-radius: 6px;
                 min-height: 20px;
             }
+            
             QScrollBar::handle:vertical:hover {
                 background-color: #818181;
             }
+            
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                 height: 0px;
             }
+            
             QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
                 background: none;
             }
@@ -446,6 +474,7 @@ class MainWindow(QMainWindow):
         
         # left ad mockups (2 stacked)
         left_ads = QVBoxLayout()
+        
         self.left_ad1 = QLabel()
         self.left_ad1.setStyleSheet("border: 1px solid #212124; border-radius: 8px;")
         self.left_ad1.setAlignment(Qt.AlignCenter)
@@ -478,16 +507,18 @@ class MainWindow(QMainWindow):
         logo_label.setAlignment(Qt.AlignCenter)
         logo_label.setFixedSize(50, 50) 
         logo_label.setScaledContents(True)
-        
         logo_path = "/Users/juliamoor/Desktop/MoodyStream/gui/moody_logo.jpg"
         if os.path.exists(logo_path):
             logo_pixmap = QPixmap(logo_path)
             logo_label.setPixmap(logo_pixmap)
-        
         controls_layout.addWidget(logo_label)
         controls_layout.addSpacing(20)
         
-        # volume control
+        # Sliders in vertikalem Layout
+        sliders_layout = QVBoxLayout()
+        
+        # Volume slider row
+        volume_row = QHBoxLayout()
         volume_label = QLabel("Volume:")
         self.volume_slider = QSlider(Qt.Horizontal)
         self.volume_slider.setMinimum(0)
@@ -497,9 +528,30 @@ class MainWindow(QMainWindow):
         self.volume_slider.valueChanged.connect(self.volume_changed)
         self.volume_value_label = QLabel("50%")
         
-        controls_layout.addWidget(volume_label)
-        controls_layout.addWidget(self.volume_slider)
-        controls_layout.addWidget(self.volume_value_label)
+        volume_row.addWidget(volume_label)
+        volume_row.addWidget(self.volume_slider)
+        volume_row.addWidget(self.volume_value_label)
+        
+        # Sensitivity slider row
+        sensitivity_row = QHBoxLayout()
+        sensitivity_label = QLabel("Sensitivity:")
+        self.sensitivity_slider = QSlider(Qt.Horizontal)
+        self.sensitivity_slider.setMinimum(0)
+        self.sensitivity_slider.setMaximum(100)
+        self.sensitivity_slider.setValue(50)
+        self.sensitivity_slider.setMaximumWidth(100)
+        self.sensitivity_slider.valueChanged.connect(self.sensitivity_changed)
+        self.sensitivity_value_label = QLabel("50%")
+        
+        sensitivity_row.addWidget(sensitivity_label)
+        sensitivity_row.addWidget(self.sensitivity_slider)
+        sensitivity_row.addWidget(self.sensitivity_value_label)
+        
+        # Beide Slider Rows zum vertikalen Layout hinzufügen
+        sliders_layout.addLayout(volume_row)
+        sliders_layout.addLayout(sensitivity_row)
+        
+        controls_layout.addLayout(sliders_layout)
         controls_layout.addSpacing(20)
         
         # start stream button
@@ -529,14 +581,11 @@ class MainWindow(QMainWindow):
         self.live_icon_label.setAlignment(Qt.AlignCenter)
         self.live_icon_label.setFixedSize(70, 40)
         self.live_icon_label.setScaledContents(True)
-        
         live_icon_path = "/Users/juliamoor/Desktop/MoodyStream/gui/live_icon.png"
         if os.path.exists(live_icon_path):
             live_icon_pixmap = QPixmap(live_icon_path)
             self.live_icon_label.setPixmap(live_icon_pixmap)
-        
         self.live_icon_label.setVisible(False)  # initially hidden
-        
         controls_layout.addWidget(self.live_icon_label)
         
         # camera display
@@ -593,9 +642,10 @@ class MainWindow(QMainWindow):
         center_layout.addSpacing(8)
         center_layout.addWidget(button_container, 0, Qt.AlignHCenter)
         center_layout.addStretch()
-
+        
         # right ads (stacked over each other)
         right_ads = QVBoxLayout()
+        
         self.right_ad1 = QLabel()
         self.right_ad1.setStyleSheet("border: 1px solid #212124; border-radius: 8px;")
         self.right_ad1.setAlignment(Qt.AlignCenter)
@@ -615,7 +665,7 @@ class MainWindow(QMainWindow):
         right_ads.addWidget(self.right_ad1)
         right_ads.addWidget(self.right_ad2)
         right_ads.addStretch()
-    
+        
         # adding everything to main layout
         main_layout.addLayout(left_ads, 1)
         main_layout.addLayout(center_layout, 3)
@@ -657,13 +707,16 @@ class MainWindow(QMainWindow):
         """Lautstärke aktualisieren"""
         self.volume_value_label.setText(f"{value}%")
     
+    def sensitivity_changed(self, value):
+        """Sensitivity aktualisieren"""
+        self.sensitivity_value_label.setText(f"{value}%")
+    
     def update_frame(self):
         ret, frame = self.cap.read()
         if ret:
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             h, w, ch = frame.shape
             bytes_per_line = ch * w
-            
             qt_image = QImage(frame.data, w, h, bytes_per_line, QImage.Format_RGB888)
             pixmap = QPixmap.fromImage(qt_image)
             scaled_pixmap = pixmap.scaled(self.camera_label.size(), 
@@ -674,7 +727,6 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         self.cap.release()
         event.accept()
-
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
