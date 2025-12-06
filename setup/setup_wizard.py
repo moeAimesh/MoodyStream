@@ -101,7 +101,7 @@ def run_rest_face_setup(user="default", force_record=None):
         if not summary:
             break
 
-        retry_emotions = [emo for emo, stats in summary.items() if stats.get("removed", 0) > 2]
+        retry_emotions = [emo for emo, stats in summary.items() if stats.get("removed", 0) > 3]
         if not retry_emotions:
             break
 
