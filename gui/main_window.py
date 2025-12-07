@@ -1,148 +1,556 @@
-"""Task: Window with tabs: Setup, Live, Settings.
-Inputs: Events from Camera/Audio.
-Outputs: Visual feedback, Buttons ("Restart Setup", "Switch Profile").
-Tip: GUI in separate thread or async."""
 import sys
 import cv2
-import webbrowser
-import os
+import pygame
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                             QHBoxLayout, QPushButton, QLabel, QDialog, 
-                             QSpinBox, QSlider, QFormLayout, QMenuBar, QMenu,
-                             QComboBox, QGridLayout, QLineEdit, QFileDialog,
-                             QMessageBox, QScrollArea)
-from PyQt5.QtCore import QTimer, Qt, QUrl
-from PyQt5.QtGui import QImage, QPixmap, QCursor, QIcon
-from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
+                             QHBoxLayout, QPushButton, QLabel, QScrollArea, QSlider,
+                             QDialog, QSpinBox, QMenu, QFileDialog, QMessageBox)
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal
+from PyQt5.QtGui import QPixmap, QImage
 
-class SoundButton(QPushButton):
-    """Extended Button with Sound Functionality"""
+class HoverBox(QWidget):
+    """Custom widget that changes color on hover"""
+    clicked = pyqtSignal()
+    sound_clicked = pyqtSignal()
+    play_clicked = pyqtSignal()
+    
     def __init__(self, text, parent=None):
-        super().__init__(text, parent)
-        self.sound_path = None
-        self.player = QMediaPlayer()
-        self.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.customContextMenuRequested.connect(self.show_context_menu)
+        super().__init__(parent)
+        self.text = text
+        self.hovered = False
+        self.selected_sound_file = None
+        
+        # Initialize pygame mixer for sound playback
+        if not pygame.mixer.get_init():
+            pygame.mixer.init()
+        
+        self.setMinimumHeight(50)
+        self.setMaximumHeight(50)
+        self.setCursor(Qt.PointingHandCursor)
+        
+        # Set transparent background for the main widget
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setStyleSheet("""
+            HoverBox {
+                background-color: #161618;
+                border: none;
+                border-radius: 8px;
+            }
+        """)
+        
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 0, 12, 0)
+        
+        self.label = QLabel(text)
+        self.label.setStyleSheet("color: #FFFFFF; font-size: 11px; background: transparent; border: none;")
+        layout.addWidget(self.label)
+        
+        layout.addStretch(7)
+        
+        # Play Sound Button
+        self.play_button = QPushButton("Play Sound")
+        self.play_button.setStyleSheet("""
+            QPushButton {
+                background-color: #2a2a2d;
+                color: #FFFFFF;
+                border: none;
+                border-radius: 4px;
+                padding: 4px 12px;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba(255, 107, 74, 0.3),
+                    stop:0.5 rgba(255, 59, 143, 0.3),
+                    stop:1 rgba(255, 105, 180, 0.3)
+                );
+            }
+            QPushButton:pressed {
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba(255, 107, 74, 0.5),
+                    stop:0.5 rgba(255, 59, 143, 0.5),
+                    stop:1 rgba(255, 105, 180, 0.5)
+                );
+            }
+        """)
+        self.play_button.setFixedHeight(30)
+        self.play_button.clicked.connect(self.on_play_button_clicked)
+        layout.addWidget(self.play_button)
+        
+        layout.addSpacing(10)
+        
+        # Choose Sound Button with Dropdown
+        self.sound_button = QPushButton("Choose Sound")
+        self.sound_button.setStyleSheet("""
+            QPushButton {
+                background-color: #2a2a2d;
+                color: #FFFFFF;
+                border: none;
+                border-radius: 4px;
+                padding: 4px 12px;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba(255, 107, 74, 0.3),
+                    stop:0.5 rgba(255, 59, 143, 0.3),
+                    stop:1 rgba(255, 105, 180, 0.3)
+                );
+            }
+            QPushButton:pressed {
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba(255, 107, 74, 0.5),
+                    stop:0.5 rgba(255, 59, 143, 0.5),
+                    stop:1 rgba(255, 105, 180, 0.5)
+                );
+            }
+        """)
+        self.sound_button.setFixedHeight(30)
+        self.sound_button.clicked.connect(self.show_sound_menu)
+        layout.addWidget(self.sound_button)
+        
+        layout.addSpacing(25)
     
-    def show_context_menu(self, position):
-        """Shows context menu on right click"""
+    def show_sound_menu(self):
+        """Show dropdown menu for sound selection"""
         menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #212124;
+                color: #FFFFFF;
+                border: 1px solid #000000;
+                border-radius: 8px;
+                padding: 4px;
+            }
+            QMenu::item {
+                padding: 6px 24px 6px 12px;
+                border-radius: 4px;
+            }
+            QMenu::item:selected {
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba(255, 107, 74, 0.3),
+                    stop:0.5 rgba(255, 59, 143, 0.3),
+                    stop:1 rgba(255, 105, 180, 0.3)
+                );
+            }
+        """)
         
-        # options in context menu
-        search_action = menu.addAction("Search sound on web")
-        load_action = menu.addAction("Load sound file")
-        menu.addSeparator()
+        browse_web_action = menu.addAction("Browse Web")
+        browse_computer_action = menu.addAction("Browse Computer")
         
-        if self.sound_path:
-            play_action = menu.addAction("Play sound")
-            remove_action = menu.addAction("Remove sound")
-            info_action = menu.addAction(f"Current sound: {self.sound_path.split('/')[-1]}")
-            info_action.setEnabled(False)
+        browse_web_action.triggered.connect(self.browse_web)
+        browse_computer_action.triggered.connect(self.browse_computer)
         
-        # execute action
-        action = menu.exec_(self.mapToGlobal(position))
-        
-        if action == search_action:
-            self.open_sound_search()
-        elif action == load_action:
-            self.load_sound_file()
-        elif self.sound_path and action == play_action:
-            self.play_sound()
-        elif self.sound_path and action == remove_action:
-            self.remove_sound()
+        # Show menu below the button
+        menu.exec_(self.sound_button.mapToGlobal(self.sound_button.rect().bottomLeft()))
     
-    def open_sound_search(self):
-        """Opens MyInstants in browser"""
-        url = "https://www.myinstants.com/en/search/?name=MEME"
-        webbrowser.open(url)
-        
-        # show info dialog
-        QMessageBox.information(
-            self,
-            "Sound Search",
-            "Browser has been opened!\n\n"
-            "How to link a sound:\n"
-            "1. Search for a sound on MyInstants\n"
-            "2. Download the sound (e.g., by emailing it to yourself)\n"
-            "3. Return to our app and right-click on 'add sound'\n"
-            "4. Select your downloaded sound"
-        )
+    def browse_web(self):
+        """Handle Browse Web option"""
+        print(f"Browse Web selected for {self.text}")
+        # Hier kann später die Web-Browser-Funktionalität implementiert werden
+        self.sound_clicked.emit()
     
-    def load_sound_file(self):
-        """Loads a sound file from computer"""
-        file_path, _ = QFileDialog.getOpenFileName(
+    def browse_computer(self):
+        """Handle Browse Computer option - open file dialog"""
+        file_dialog = QFileDialog(self)
+        file_dialog.setStyleSheet("""
+            QFileDialog {
+                background-color: #161618;
+                color: #FFFFFF;
+            }
+            QFileDialog QWidget {
+                background-color: #161618;
+                color: #FFFFFF;
+            }
+            QFileDialog QPushButton {
+                background-color: #212124;
+                color: #FFFFFF;
+                border: none;
+                border-radius: 6px;
+                padding: 6px 12px;
+            }
+            QFileDialog QPushButton:hover {
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba(255, 107, 74, 0.3),
+                    stop:0.5 rgba(255, 59, 143, 0.3),
+                    stop:1 rgba(255, 105, 180, 0.3)
+                );
+            }
+            QFileDialog QTreeView, QFileDialog QListView {
+                background-color: #161618;
+                color: #FFFFFF;
+                border: 1px solid #212124;
+            }
+            QFileDialog QLineEdit {
+                background-color: #212124;
+                color: #FFFFFF;
+                border: 1px solid #000000;
+                border-radius: 4px;
+                padding: 4px;
+            }
+            QFileDialog QComboBox {
+                background-color: #212124;
+                color: #FFFFFF;
+            }
+        """)
+        
+        file_path, _ = file_dialog.getOpenFileName(
             self,
-            "Select sound file",
+            "Select Sound File",
             "",
-            "Audio files (*.mp3 *.wav *.ogg);;All files (*.*)"
+            "Audio Files (*.mp3 *.wav *.ogg *.m4a);;All Files (*.*)"
         )
         
         if file_path:
-            self.sound_path = file_path
-            url = QUrl.fromLocalFile(file_path)
-            self.player.setMedia(QMediaContent(url))
-            self.player.setVolume(100)
+            self.selected_sound_file = file_path
+            print(f"Selected sound file for {self.text}: {file_path}")
+            # Optional: Update button text to show file is selected
+            import os
+            filename = os.path.basename(file_path)
+            self.sound_button.setToolTip(f"Selected: {filename}")
     
-    def play_sound(self):
-        """Plays the linked sound"""
-        if self.sound_path and self.player:
-            self.player.stop()
-            self.player.play()
-    
-    def remove_sound(self):
-        """Removes the linked sound"""
-        self.sound_path = None
-        self.player.stop()
-        self.player.setMedia(QMediaContent())
-    
+    def on_play_button_clicked(self):
+        if self.selected_sound_file:
+            try:
+                # Load and play the sound
+                pygame.mixer.music.load(self.selected_sound_file)
+                pygame.mixer.music.play()
+                print(f"Playing sound: {self.selected_sound_file}")
+            except Exception as e:
+                print(f"Error playing sound: {e}")
+                # Show error message to user
+                msg = QMessageBox()
+                msg.setIcon(QMessageBox.Warning)
+                msg.setWindowTitle("Sound Playback Error")
+                msg.setText(f"Could not play sound file:\n{str(e)}")
+                msg.setStyleSheet("""
+                    QMessageBox {
+                        background-color: #161618;
+                        color: #FFFFFF;
+                    }
+                    QMessageBox QLabel {
+                        color: #FFFFFF;
+                    }
+                    QMessageBox QPushButton {
+                        background-color: #212124;
+                        color: #FFFFFF;
+                        border: none;
+                        border-radius: 6px;
+                        padding: 6px 12px;
+                        min-width: 70px;
+                    }
+                    QMessageBox QPushButton:hover {
+                        background: qlineargradient(
+                            x1:0, y1:0, x2:1, y2:1,
+                            stop:0 rgba(255, 107, 74, 0.3),
+                            stop:0.5 rgba(255, 59, 143, 0.3),
+                            stop:1 rgba(255, 105, 180, 0.3)
+                        );
+                    }
+                """)
+                msg.exec_()
+        else:
+            print(f"No sound file selected for {self.text}")
+            # Show info message to user
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Information)
+            msg.setWindowTitle("No Sound Selected")
+            msg.setText("Please select a sound file first using 'Choose Sound'.")
+            msg.setStyleSheet("""
+                QMessageBox {
+                    background-color: #161618;
+                    color: #FFFFFF;
+                }
+                QMessageBox QLabel {
+                    color: #FFFFFF;
+                }
+                QMessageBox QPushButton {
+                    background-color: #212124;
+                    color: #FFFFFF;
+                    border: none;
+                    border-radius: 6px;
+                    padding: 6px 12px;
+                    min-width: 70px;
+                }
+                QMessageBox QPushButton:hover {
+                    background: qlineargradient(
+                        x1:0, y1:0, x2:1, y2:1,
+                        stop:0 rgba(255, 107, 74, 0.3),
+                        stop:0.5 rgba(255, 59, 143, 0.3),
+                        stop:1 rgba(255, 105, 180, 0.3)
+                    );
+                }
+            """)
+            msg.exec_()
+        self.play_clicked.emit()
+        
+    def on_sound_button_clicked(self):
+        self.sound_clicked.emit()
+        
+    def enterEvent(self, event):
+        self.setStyleSheet("""
+            HoverBox {
+                background-color: #3a3a3d;
+                border: none;
+                border-radius: 8px;
+            }
+        """)
+        # Update button colors when hovering over box (but not the button itself)
+        self.play_button.setStyleSheet("""
+            QPushButton {
+                background-color: #3a3a3d;
+                color: #FFFFFF;
+                border: none;
+                border-radius: 4px;
+                padding: 4px 12px;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba(255, 107, 74, 0.3),
+                    stop:0.5 rgba(255, 59, 143, 0.3),
+                    stop:1 rgba(255, 105, 180, 0.3)
+                );
+            }
+            QPushButton:pressed {
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba(255, 107, 74, 0.5),
+                    stop:0.5 rgba(255, 59, 143, 0.5),
+                    stop:1 rgba(255, 105, 180, 0.5)
+                );
+            }
+        """)
+        self.sound_button.setStyleSheet("""
+            QPushButton {
+                background-color: #3a3a3d;
+                color: #FFFFFF;
+                border: none;
+                border-radius: 4px;
+                padding: 4px 12px;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba(255, 107, 74, 0.3),
+                    stop:0.5 rgba(255, 59, 143, 0.3),
+                    stop:1 rgba(255, 105, 180, 0.3)
+                );
+            }
+            QPushButton:pressed {
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba(255, 107, 74, 0.5),
+                    stop:0.5 rgba(255, 59, 143, 0.5),
+                    stop:1 rgba(255, 105, 180, 0.5)
+                );
+            }
+        """)
+        super().enterEvent(event)
+        
+    def leaveEvent(self, event):
+        self.setStyleSheet("""
+            HoverBox {
+                background-color: #161618;
+                border: none;
+                border-radius: 8px;
+            }
+        """)
+        # Reset button colors to default
+        self.play_button.setStyleSheet("""
+            QPushButton {
+                background-color: #2a2a2d;
+                color: #FFFFFF;
+                border: none;
+                border-radius: 4px;
+                padding: 4px 12px;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba(255, 107, 74, 0.3),
+                    stop:0.5 rgba(255, 59, 143, 0.3),
+                    stop:1 rgba(255, 105, 180, 0.3)
+                );
+            }
+            QPushButton:pressed {
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba(255, 107, 74, 0.5),
+                    stop:0.5 rgba(255, 59, 143, 0.5),
+                    stop:1 rgba(255, 105, 180, 0.5)
+                );
+            }
+        """)
+        self.sound_button.setStyleSheet("""
+            QPushButton {
+                background-color: #2a2a2d;
+                color: #FFFFFF;
+                border: none;
+                border-radius: 4px;
+                padding: 4px 12px;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba(255, 107, 74, 0.3),
+                    stop:0.5 rgba(255, 59, 143, 0.3),
+                    stop:1 rgba(255, 105, 180, 0.3)
+                );
+            }
+            QPushButton:pressed {
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba(255, 107, 74, 0.5),
+                    stop:0.5 rgba(255, 59, 143, 0.5),
+                    stop:1 rgba(255, 105, 180, 0.5)
+                );
+            }
+        """)
+        super().leaveEvent(event)
+        
     def mousePressEvent(self, event):
-        """Handles normal clicks (left) and plays sound"""
         if event.button() == Qt.LeftButton:
-            if self.sound_path:
-                self.play_sound()
+            # Check if click was on the buttons
+            if not self.sound_button.geometry().contains(event.pos()) and not self.play_button.geometry().contains(event.pos()):
+                self.clicked.emit()
         super().mousePressEvent(event)
 
 class SettingsDialog(QDialog):
-    def __init__(self, parent=None):
+    """Settings dialog for camera configuration"""
+    
+    restart_setup_signal = pyqtSignal()
+    
+    def __init__(self, current_camera_index, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Settings")
-        self.setMinimumWidth(300)
-        self.parent_window = parent
+        self.setModal(True)
+        self.setFixedSize(400, 200)
         
-        layout = QFormLayout()
+        # Apply the same dark theme
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #161618;
+                color: #FFFFFF;
+            }
+            QLabel {
+                color: #FFFFFF;
+                font-size: 13px;
+            }
+            QPushButton {
+                background-color: #212124;
+                color: #FFFFFF;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-size: 13px;
+                min-width: 80px;
+            }
+            QPushButton:hover {
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba(255, 107, 74, 0.3),
+                    stop:0.5 rgba(255, 59, 143, 0.3),
+                    stop:1 rgba(255, 105, 180, 0.3)
+                );
+            }
+            QPushButton:pressed {
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba(255, 107, 74, 0.5),
+                    stop:0.5 rgba(255, 59, 143, 0.5),
+                    stop:1 rgba(255, 105, 180, 0.5)
+                );
+            }
+            QSpinBox {
+                background-color: #212124;
+                color: #FFFFFF;
+                border: none;
+                border-radius: 6px;
+                padding: 6px 12px;
+                font-size: 13px;
+            }
+            QSpinBox:hover {
+                background-color: #2a2a2d;
+            }
+            QSpinBox::up-button, QSpinBox::down-button {
+                background-color: transparent;
+                border: none;
+                width: 16px;
+            }
+            QSpinBox::up-arrow {
+                image: none;
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                border-bottom: 5px solid #FFFFFF;
+            }
+            QSpinBox::down-arrow {
+                image: none;
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                border-top: 5px solid #FFFFFF;
+            }
+        """)
         
-        # camera selection dropdown
-        self.camera_combo = QComboBox()
-        for i in range(4):
-            self.camera_combo.addItem(f"Camera {i}", i)
-        if parent:
-            self.camera_combo.setCurrentIndex(parent.camera_index)
-        self.camera_combo.currentIndexChanged.connect(self.change_camera)
-        layout.addRow("Camera Index:", self.camera_combo)
+        layout = QVBoxLayout(self)
+        layout.setSpacing(20)
+        layout.setContentsMargins(20, 20, 20, 20)
         
-        # restart setup button
-        self.restart_setup_btn = QPushButton("Restart Setup")
-        self.restart_setup_btn.clicked.connect(self.restart_setup)
-        layout.addRow(self.restart_setup_btn)
+        # Camera Index Setting
+        camera_layout = QHBoxLayout()
+        camera_label = QLabel("Camera Index:")
+        camera_layout.addWidget(camera_label)
         
-        self.setLayout(layout)
+        self.camera_spinbox = QSpinBox()
+        self.camera_spinbox.setMinimum(0)
+        self.camera_spinbox.setMaximum(10)
+        self.camera_spinbox.setValue(current_camera_index)
+        self.camera_spinbox.setFixedWidth(100)
+        camera_layout.addWidget(self.camera_spinbox)
+        camera_layout.addStretch()
+        
+        layout.addLayout(camera_layout)
+        
+        # Restart Setup Button
+        restart_layout = QHBoxLayout()
+        restart_button = QPushButton("Restart Setup")
+        restart_button.clicked.connect(self.restart_setup)
+        restart_layout.addWidget(restart_button)
+        restart_layout.addStretch()
+        
+        layout.addLayout(restart_layout)
+        
+        # Buttons
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        
+        cancel_button = QPushButton("Cancel")
+        cancel_button.clicked.connect(self.reject)
+        button_layout.addWidget(cancel_button)
+        
+        ok_button = QPushButton("OK")
+        ok_button.clicked.connect(self.accept)
+        button_layout.addWidget(ok_button)
+        
+        layout.addLayout(button_layout)
     
-    def change_camera(self, index):
-        """Kamera sofort wechseln"""
-        if self.parent_window:
-            new_camera_index = self.camera_combo.currentData()
-            if new_camera_index != self.parent_window.camera_index:
-                self.parent_window.cap.release()
-                self.parent_window.camera_index = new_camera_index
-                self.parent_window.cap = cv2.VideoCapture(new_camera_index)
+    def get_camera_index(self):
+        return self.camera_spinbox.value()
     
     def restart_setup(self):
-        """Setup erneut starten"""
-        QMessageBox.information(
-            self,
-            "Setup",
-            "Setup will be resstarted one Julia remembers to implement it."
-        )
+        """Emit signal to restart setup"""
+        self.restart_setup_signal.emit()
+        print("Restart Setup clicked - Setup wird neu gestartet")
+        # Hier kann später die Logik zum Neustarten des Setups implementiert werden
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -178,7 +586,6 @@ class MainWindow(QMainWindow):
                 padding: 8px 16px;
                 font-size: 13px;
             }
-            
             QPushButton:hover {
                 background: qlineargradient(
                     x1:0, y1:0, x2:1, y2:1,
@@ -187,7 +594,6 @@ class MainWindow(QMainWindow):
                     stop:1 rgba(255, 105, 180, 0.3)
                 );
             }
-            
             QPushButton:pressed {
                 background: qlineargradient(
                     x1:0, y1:0, x2:1, y2:1,
@@ -196,27 +602,7 @@ class MainWindow(QMainWindow):
                     stop:1 rgba(255, 105, 180, 0.5)
                 );
             }
-            
-            /* Sound Buttons mit Logo-Farbverlauf beim Hover */
-            SoundButton {
-                background-color: #212124;
-                color: #FFFFFF;
-                border: none;
-                border-radius: 6px;
-                padding: 8px 16px;
-                font-size: 13px;
-            }
-            
-            SoundButton:hover {
-                background: qlineargradient(
-                    x1:0, y1:0, x2:1, y2:1,
-                    stop:0 rgba(255, 107, 74, 0.3),
-                    stop:0.5 rgba(255, 59, 143, 0.3),
-                    stop:1 rgba(255, 105, 180, 0.3)
-                );
-            }
-            
-            SoundButton:pressed {
+            QPushButton:checked {
                 background: qlineargradient(
                     x1:0, y1:0, x2:1, y2:1,
                     stop:0 rgba(255, 107, 74, 0.5),
@@ -234,7 +620,6 @@ class MainWindow(QMainWindow):
                 padding: 6px 12px;
                 font-size: 13px;
             }
-            
             QComboBox:hover {
                 background: qlineargradient(
                     x1:0, y1:0, x2:1, y2:1,
@@ -243,12 +628,10 @@ class MainWindow(QMainWindow):
                     stop:1 rgba(255, 105, 180, 0.3)
                 );
             }
-            
             QComboBox::drop-down {
                 border: none;
                 width: 20px;
             }
-            
             QComboBox::down-arrow {
                 image: none;
                 border-left: 4px solid transparent;
@@ -256,7 +639,6 @@ class MainWindow(QMainWindow):
                 border-top: 5px solid #FFFFFF;
                 margin-right: 8px;
             }
-            
             QComboBox QAbstractItemView {
                 background-color: #212124;
                 color: #FFFFFF;
@@ -268,12 +650,27 @@ class MainWindow(QMainWindow):
             }
             
             /* Slider - Custom Apple Style */
+            QSlider::groove:vertical {
+                background-color: #212124;
+                width: 4px;
+                border-radius: 2px;
+            }
+            QSlider::handle:vertical {
+                background-color: #FFFFFF;
+                width: 18px;
+                height: 18px;
+                margin: 0 -7px;
+                border-radius: 9px;
+                border: none;
+            }
+            QSlider::handle:vertical:hover {
+                background-color: #818181;
+            }
             QSlider::groove:horizontal {
                 background-color: #212124;
                 height: 4px;
                 border-radius: 2px;
             }
-            
             QSlider::handle:horizontal {
                 background-color: #FFFFFF;
                 width: 18px;
@@ -282,7 +679,6 @@ class MainWindow(QMainWindow):
                 border-radius: 9px;
                 border: none;
             }
-            
             QSlider::handle:horizontal:hover {
                 background-color: #818181;
             }
@@ -296,24 +692,20 @@ class MainWindow(QMainWindow):
                 padding: 6px 12px;
                 font-size: 13px;
             }
-            
             QSpinBox:hover {
                 background-color: #818181;
             }
-            
             QSpinBox::up-button, QSpinBox::down-button {
                 background-color: transparent;
                 border: none;
                 width: 16px;
             }
-            
             QSpinBox::up-arrow {
                 image: none;
                 border-left: 4px solid transparent;
                 border-right: 4px solid transparent;
                 border-bottom: 5px solid #FFFFFF;
             }
-            
             QSpinBox::down-arrow {
                 image: none;
                 border-left: 4px solid transparent;
@@ -329,17 +721,14 @@ class MainWindow(QMainWindow):
                 padding: 4px;
                 font-size: 13px;
             }
-            
             QMenuBar::item {
                 background-color: transparent;
                 padding: 4px 12px;
                 border-radius: 4px;
             }
-            
             QMenuBar::item:selected {
                 background-color: #212124;
             }
-            
             QMenuBar::item:pressed {
                 background-color: #818181;
             }
@@ -352,16 +741,13 @@ class MainWindow(QMainWindow):
                 border-radius: 8px;
                 padding: 4px;
             }
-            
             QMenu::item {
                 padding: 6px 24px 6px 12px;
                 border-radius: 4px;
             }
-            
             QMenu::item:selected {
                 background-color: #818181;
             }
-            
             QMenu::separator {
                 height: 1px;
                 background-color: #000000;
@@ -373,16 +759,13 @@ class MainWindow(QMainWindow):
                 background-color: #161618;
                 color: #FFFFFF;
             }
-            
             QMessageBox {
                 background-color: #161618;
                 color: #FFFFFF;
             }
-            
             QMessageBox QLabel {
                 color: #FFFFFF;
             }
-            
             QMessageBox QPushButton {
                 min-width: 70px;
             }
@@ -392,29 +775,24 @@ class MainWindow(QMainWindow):
                 background-color: #161618;
                 color: #FFFFFF;
             }
-            
             QFileDialog QWidget {
                 background-color: #161618;
                 color: #FFFFFF;
             }
-            
             QFileDialog QPushButton {
                 background-color: #212124;
                 color: #FFFFFF;
             }
-            
             QFileDialog QTreeView {
                 background-color: #161618;
                 color: #FFFFFF;
                 border: 1px solid #212124;
             }
-            
             QFileDialog QListView {
                 background-color: #161618;
                 color: #FFFFFF;
                 border: 1px solid #212124;
             }
-            
             QFileDialog QLineEdit {
                 background-color: #212124;
                 color: #FFFFFF;
@@ -422,7 +800,6 @@ class MainWindow(QMainWindow):
                 border-radius: 4px;
                 padding: 4px;
             }
-            
             QFileDialog QComboBox {
                 background-color: #212124;
                 color: #FFFFFF;
@@ -433,48 +810,38 @@ class MainWindow(QMainWindow):
                 background-color: transparent;
                 border: none;
             }
-            
             QScrollBar:vertical {
                 background-color: #161618;
                 width: 12px;
                 border-radius: 6px;
             }
-            
             QScrollBar::handle:vertical {
                 background-color: #212124;
                 border-radius: 6px;
                 min-height: 20px;
             }
-            
             QScrollBar::handle:vertical:hover {
                 background-color: #818181;
             }
-            
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                 height: 0px;
             }
-            
             QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
                 background: none;
             }
         """)
         
-        # initialising camera
-        self.camera_index = 1
+        # Initialize camera
+        self.camera_index = 0
         self.cap = cv2.VideoCapture(self.camera_index)
-        self.streaming = False
+        self.emotion_detection_active = True
         
-        # menu
-        self.create_menu()
-        
-        # main widget and layout
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QHBoxLayout(central_widget)
         
-        # left ad mockups (2 stacked)
+       # left ad mockups (2 stacked)
         left_ads = QVBoxLayout()
-        
         self.left_ad1 = QLabel()
         self.left_ad1.setStyleSheet("border: 1px solid #212124; border-radius: 8px;")
         self.left_ad1.setAlignment(Qt.AlignCenter)
@@ -495,157 +862,258 @@ class MainWindow(QMainWindow):
         left_ads.addWidget(self.left_ad2)
         left_ads.addStretch()
         
-        # middle area (Camera + Controls + Buttons)
+        # --- CENTER CONTENT ---
         center_layout = QVBoxLayout()
         
-        # controls center on top of camera
-        controls_layout = QHBoxLayout()
+        # Top controls (Logo, Title, Settings and Emotion Detection toggle)
+        top_controls = QHBoxLayout()
         
         # Logo
-        logo_label = QLabel()
-        logo_label.setStyleSheet("background-color: transparent; border: none;")
-        logo_label.setAlignment(Qt.AlignCenter)
-        logo_label.setFixedSize(50, 50) 
-        logo_label.setScaledContents(True)
-        logo_path = "/Users/juliamoor/Desktop/MoodyStream/gui/moody_logo.jpg"
-        if os.path.exists(logo_path):
-            logo_pixmap = QPixmap(logo_path)
-            logo_label.setPixmap(logo_pixmap)
-        controls_layout.addWidget(logo_label)
-        controls_layout.addSpacing(20)
+        self.logo_label = QLabel()
+        logo_pixmap = QPixmap("/Users/juliamoor/Desktop/MoodyStream/gui/moody_logo.jpg")
+        scaled_logo = logo_pixmap.scaled(40, 40, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self.logo_label.setPixmap(scaled_logo)
+        self.logo_label.setFixedSize(40, 40)
+        top_controls.addWidget(self.logo_label)
         
-        # Sliders in vertikalem Layout
-        sliders_layout = QVBoxLayout()
+        top_controls.addSpacing(15)
         
-        # Volume slider row
-        volume_row = QHBoxLayout()
-        volume_label = QLabel("Volume:")
-        self.volume_slider = QSlider(Qt.Horizontal)
-        self.volume_slider.setMinimum(0)
-        self.volume_slider.setMaximum(100)
-        self.volume_slider.setValue(50)
-        self.volume_slider.setMaximumWidth(100)
-        self.volume_slider.valueChanged.connect(self.volume_changed)
-        self.volume_value_label = QLabel("50%")
+        # Title
+        title_label = QLabel("MOODYSTREAM")
+        title_label.setStyleSheet("font-size: 18px; font-weight: bold; letter-spacing: 1px;")
+        top_controls.addWidget(title_label)
         
-        volume_row.addWidget(volume_label)
-        volume_row.addWidget(self.volume_slider)
-        volume_row.addWidget(self.volume_value_label)
+        top_controls.addStretch()
         
-        # Sensitivity slider row
-        sensitivity_row = QHBoxLayout()
-        sensitivity_label = QLabel("Sensitivity:")
-        self.sensitivity_slider = QSlider(Qt.Horizontal)
-        self.sensitivity_slider.setMinimum(0)
-        self.sensitivity_slider.setMaximum(100)
-        self.sensitivity_slider.setValue(50)
-        self.sensitivity_slider.setMaximumWidth(100)
-        self.sensitivity_slider.valueChanged.connect(self.sensitivity_changed)
-        self.sensitivity_value_label = QLabel("50%")
-        
-        sensitivity_row.addWidget(sensitivity_label)
-        sensitivity_row.addWidget(self.sensitivity_slider)
-        sensitivity_row.addWidget(self.sensitivity_value_label)
-        
-        # Beide Slider Rows zum vertikalen Layout hinzufügen
-        sliders_layout.addLayout(volume_row)
-        sliders_layout.addLayout(sensitivity_row)
-        
-        controls_layout.addLayout(sliders_layout)
-        controls_layout.addSpacing(20)
-        
-        # start stream button
-        self.start_stream_button = QPushButton("Start Stream")
-        self.start_stream_button.clicked.connect(self.start_stream)
-        self.start_stream_button.setFixedWidth(130)
-        controls_layout.addWidget(self.start_stream_button)
-        
-        # end stream button
-        self.end_stream_button = QPushButton("End Stream")
-        self.end_stream_button.clicked.connect(self.end_stream)
-        self.end_stream_button.setFixedWidth(130)
-        self.end_stream_button.setEnabled(False)
-        controls_layout.addWidget(self.end_stream_button)
-        
-        # settings button
-        self.settings_button = QPushButton("Settings")
+        self.settings_button = QPushButton("⚙ Settings")
+        self.settings_button.setFixedSize(100, 32)
         self.settings_button.clicked.connect(self.open_settings)
-        self.settings_button.setFixedWidth(130)
-        controls_layout.addWidget(self.settings_button)
+        self.settings_button.setStyleSheet("""
+            QPushButton {
+                background-color: #212124;
+                color: #FFFFFF;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba(255, 107, 74, 0.3),
+                    stop:0.5 rgba(255, 59, 143, 0.3),
+                    stop:1 rgba(255, 105, 180, 0.3)
+                );
+            }
+            QPushButton:pressed {
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba(255, 107, 74, 0.5),
+                    stop:0.5 rgba(255, 59, 143, 0.5),
+                    stop:1 rgba(255, 105, 180, 0.5)
+                );
+            }
+        """)
         
-        controls_layout.addStretch()
+        top_controls.addSpacing(10)
         
-        # Live Icon
-        self.live_icon_label = QLabel()
-        self.live_icon_label.setStyleSheet("background-color: transparent; border: none;")
-        self.live_icon_label.setAlignment(Qt.AlignCenter)
-        self.live_icon_label.setFixedSize(70, 40)
-        self.live_icon_label.setScaledContents(True)
-        live_icon_path = "/Users/juliamoor/Desktop/MoodyStream/gui/live_icon.png"
-        if os.path.exists(live_icon_path):
-            live_icon_pixmap = QPixmap(live_icon_path)
-            self.live_icon_label.setPixmap(live_icon_pixmap)
-        self.live_icon_label.setVisible(False)  # initially hidden
-        controls_layout.addWidget(self.live_icon_label)
+        self.emotion_detection_button = QPushButton("Detection: ON")
+        self.emotion_detection_button.setFixedSize(140, 32)
+        self.emotion_detection_button.setCheckable(True)
+        self.emotion_detection_button.setChecked(True)
+        self.emotion_detection_button.clicked.connect(self.toggle_emotion_detection)
+        self.emotion_detection_button.setStyleSheet("""
+            QPushButton {
+                background-color: #212124;
+                color: #FFFFFF;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba(255, 107, 74, 0.3),
+                    stop:0.5 rgba(255, 59, 143, 0.3),
+                    stop:1 rgba(255, 105, 180, 0.3)
+                );
+            }
+            QPushButton:pressed {
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba(255, 107, 74, 0.5),
+                    stop:0.5 rgba(255, 59, 143, 0.5),
+                    stop:1 rgba(255, 105, 180, 0.5)
+                );
+            }
+            QPushButton:checked {
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba(255, 107, 74, 0.5),
+                    stop:0.5 rgba(255, 59, 143, 0.5),
+                    stop:1 rgba(255, 105, 180, 0.5)
+                );
+            }
+        """)
         
-        # camera display
+        top_controls.addWidget(self.settings_button)
+        top_controls.addWidget(self.emotion_detection_button)
+        
+        center_layout.addLayout(top_controls)
+        center_layout.addSpacing(10)
+        
+        # Camera display (verkleinert auf 320px Höhe)
         self.camera_label = QLabel()
         self.camera_label.setStyleSheet("background-color: #000000; border: 1px solid #212124; border-radius: 8px;")
-        self.camera_label.setFixedSize(720, 405) #16:9 Format
+        self.camera_label.setFixedSize(640, 320)
         self.camera_label.setAlignment(Qt.AlignCenter)
-        
-        # container widget for buttons
-        button_container = QWidget()
-        button_grid = QGridLayout(button_container)
-        button_grid.setSpacing(4)
-        button_grid.setContentsMargins(0, 0, 0, 0)
-        
-        # creating buttons
-        self.btn_happy = SoundButton("Happy")
-        self.btn_surprise = SoundButton("Surprise")
-        self.btn_sad = SoundButton("Sad")
-        self.btn_fear = SoundButton("Fear")
-        self.btn_thumbs_up = SoundButton("Thumbs up")
-        self.btn_thumbs_down = SoundButton("Thumbs down")
-        self.btn_peace = SoundButton("Peace")
-        self.btn_middle_finger = SoundButton("Middelfinger")
-        self.btn_open_hand = SoundButton("Open Hand")
-        
-        buttons = [
-            self.btn_happy, self.btn_surprise, self.btn_sad,
-            self.btn_fear, self.btn_thumbs_up, self.btn_thumbs_down,
-            self.btn_peace, self.btn_middle_finger, self.btn_open_hand
-        ]
-        
-        # buttonsize
-        for btn in buttons:
-            btn.setMinimumHeight(75)
-            btn.setMinimumWidth(237)
-        
-        # buttons in 3x3 grid
-        row = 0
-        col = 0
-        for btn in buttons:
-            button_grid.addWidget(btn, row, col)
-            col += 1
-            if col >= 3:
-                col = 0
-                row += 1
-        
-        for i in range(3):
-            button_grid.setColumnStretch(i, 1)
-        
-        # adding everything into the center layout
-        center_layout.addLayout(controls_layout)
-        center_layout.addSpacing(8)
         center_layout.addWidget(self.camera_label, 0, Qt.AlignHCenter)
-        center_layout.addSpacing(8)
-        center_layout.addWidget(button_container, 0, Qt.AlignHCenter)
+        center_layout.addSpacing(20)
+        
+        # --- EMOTIONS SECTION ---
+        emotions_header = QHBoxLayout()
+        
+        emotions_label = QLabel("EMOTIONS")
+        emotions_label.setStyleSheet("font-size: 14px; font-weight: bold;")
+        emotions_header.addWidget(emotions_label)
+        
+        emotions_header.addStretch()
+        
+        # Sensitivity Slider
+        sensitivity_label = QLabel("Sensitivity")
+        sensitivity_label.setStyleSheet("font-size: 11px;")
+        emotions_header.addWidget(sensitivity_label)
+        
+        self.emotion_sensitivity_slider = QSlider(Qt.Horizontal)
+        self.emotion_sensitivity_slider.setMinimum(0)
+        self.emotion_sensitivity_slider.setMaximum(100)
+        self.emotion_sensitivity_slider.setValue(50)
+        self.emotion_sensitivity_slider.setFixedWidth(150)
+        emotions_header.addWidget(self.emotion_sensitivity_slider)
+        
+        emotions_header.addSpacing(325)
+        
+        center_layout.addLayout(emotions_header)
+        
+        emotions_layout = QHBoxLayout()
+        
+        # Container für Emotion Buttons
+        emotion_container = QWidget()
+        emotion_layout = QVBoxLayout(emotion_container)
+        emotion_layout.setSpacing(8)
+        emotion_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Emotion Boxes
+        emotion_names = ["Happy", "Surprise", "Sad", "Fear"]
+        for name in emotion_names:
+            box = HoverBox(name)
+            box.setMinimumWidth(775)
+            emotion_layout.addWidget(box)
+        
+        # Scroll Area
+        self.emotion_scroll = QScrollArea()
+        self.emotion_scroll.setWidget(emotion_container)
+        self.emotion_scroll.setWidgetResizable(False)
+        self.emotion_scroll.setFixedHeight(150)
+        self.emotion_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.emotion_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        
+        # Slider
+        self.emotion_slider = QSlider(Qt.Vertical)
+        self.emotion_slider.setMinimum(0)
+        self.emotion_slider.setMaximum(100)
+        self.emotion_slider.setValue(0)
+        self.emotion_slider.setFixedHeight(150)
+        self.emotion_slider.setInvertedAppearance(True)
+        self.emotion_slider.valueChanged.connect(self.emotion_slider_changed)
+        
+        emotions_layout.addWidget(self.emotion_scroll)
+        emotions_layout.addWidget(self.emotion_slider)
+        
+        center_layout.addLayout(emotions_layout)
+        center_layout.addSpacing(20)
+        
+        # --- GESTURES SECTION ---
+        gestures_header = QHBoxLayout()
+        
+        gestures_label = QLabel("GESTURES")
+        gestures_label.setStyleSheet("font-size: 14px; font-weight: bold;")
+        gestures_header.addWidget(gestures_label)
+        
+        gestures_header.addStretch()
+        
+        # Sensitivity Slider (jetzt zuerst)
+        gesture_sensitivity_label = QLabel("Sensitivity")
+        gesture_sensitivity_label.setStyleSheet("font-size: 11px;")
+        gestures_header.addWidget(gesture_sensitivity_label)
+        
+        self.gesture_sensitivity_slider = QSlider(Qt.Horizontal)
+        self.gesture_sensitivity_slider.setMinimum(0)
+        self.gesture_sensitivity_slider.setMaximum(100)
+        self.gesture_sensitivity_slider.setValue(50)
+        self.gesture_sensitivity_slider.setFixedWidth(150)
+        gestures_header.addWidget(self.gesture_sensitivity_slider)
+        
+        gestures_header.addSpacing(20)
+        
+        # Trigger Time Slider (jetzt zweites)
+        gesture_trigger_time_label = QLabel("Trigger Time")
+        gesture_trigger_time_label.setStyleSheet("font-size: 11px;")
+        gestures_header.addWidget(gesture_trigger_time_label)
+        
+        self.gesture_trigger_slider = QSlider(Qt.Horizontal)
+        self.gesture_trigger_slider.setMinimum(0)
+        self.gesture_trigger_slider.setMaximum(100)
+        self.gesture_trigger_slider.setValue(50)
+        self.gesture_trigger_slider.setFixedWidth(150)
+        gestures_header.addWidget(self.gesture_trigger_slider)
+        
+        gestures_header.addSpacing(50)
+        
+        center_layout.addLayout(gestures_header)
+        
+        gestures_layout = QHBoxLayout()
+        
+        # Container für Gesture Buttons
+        gesture_container = QWidget()
+        gesture_layout = QVBoxLayout(gesture_container)
+        gesture_layout.setSpacing(8)
+        gesture_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Gesture Boxes
+        gesture_names = ["Thumbs up", "Thumbs down", "Peace", "Open Hand"]
+        for name in gesture_names:
+            box = HoverBox(name)
+            box.setMinimumWidth(775)
+            gesture_layout.addWidget(box)
+        
+        # Scroll Area
+        self.gesture_scroll = QScrollArea()
+        self.gesture_scroll.setWidget(gesture_container)
+        self.gesture_scroll.setWidgetResizable(False)
+        self.gesture_scroll.setFixedHeight(150)
+        self.gesture_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.gesture_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        
+        # Slider
+        self.gesture_slider = QSlider(Qt.Vertical)
+        self.gesture_slider.setMinimum(0)
+        self.gesture_slider.setMaximum(100)
+        self.gesture_slider.setValue(0)
+        self.gesture_slider.setFixedHeight(150)
+        self.gesture_slider.setInvertedAppearance(True)
+        self.gesture_slider.valueChanged.connect(self.gesture_slider_changed)
+        
+        gestures_layout.addWidget(self.gesture_scroll)
+        gestures_layout.addWidget(self.gesture_slider)
+        
+        center_layout.addLayout(gestures_layout)
         center_layout.addStretch()
         
-        # right ads (stacked over each other)
-        right_ads = QVBoxLayout()
         
+        # right adds (stacked over each other)
+        right_ads = QVBoxLayout()
         self.right_ad1 = QLabel()
         self.right_ad1.setStyleSheet("border: 1px solid #212124; border-radius: 8px;")
         self.right_ad1.setAlignment(Qt.AlignCenter)
@@ -665,51 +1133,57 @@ class MainWindow(QMainWindow):
         right_ads.addWidget(self.right_ad1)
         right_ads.addWidget(self.right_ad2)
         right_ads.addStretch()
-        
+    
         # adding everything to main layout
         main_layout.addLayout(left_ads, 1)
         main_layout.addLayout(center_layout, 3)
         main_layout.addLayout(right_ads, 1)
         
-        # timer for frame updates
+        # Timer for camera updates
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_frame)
         self.timer.start(30)
     
-    def create_menu(self):
-        menubar = self.menuBar()
-        settings_menu = menubar.addMenu("Options")
-        
-        from PyQt5.QtWidgets import QAction
-        settings_action = QAction("Settings", self)
-        settings_action.triggered.connect(self.open_settings)
-        settings_menu.addAction(settings_action)
+    def toggle_emotion_detection(self):
+        """Toggle emotion detection on/off"""
+        self.emotion_detection_active = self.emotion_detection_button.isChecked()
+        if self.emotion_detection_active:
+            self.emotion_detection_button.setText("Detection: ON")
+        else:
+            self.emotion_detection_button.setText("Detection: OFF")
     
     def open_settings(self):
-        dialog = SettingsDialog(self)
-        dialog.exec_()
+        """Open settings dialog"""
+        dialog = SettingsDialog(self.camera_index, self)
+        dialog.restart_setup_signal.connect(self.handle_restart_setup)
+        
+        if dialog.exec_() == QDialog.Accepted:
+            new_camera_index = dialog.get_camera_index()
+            if new_camera_index != self.camera_index:
+                # Release old camera
+                self.cap.release()
+                # Set new camera index
+                self.camera_index = new_camera_index
+                # Initialize new camera
+                self.cap = cv2.VideoCapture(self.camera_index)
     
-    def start_stream(self):
-        """Stream starten"""
-        self.streaming = True
-        self.start_stream_button.setEnabled(False)
-        self.end_stream_button.setEnabled(True)
-        self.live_icon_label.setVisible(True)
+    def handle_restart_setup(self):
+        """Handle restart setup signal from settings dialog"""
+        print("Restart Setup wird durchgeführt...")
+        # Hier kann die Logik zum Neustarten des Setups implementiert werden
+        # Zum Beispiel: Alle Einstellungen zurücksetzen, Kamera neu initialisieren, etc.
     
-    def end_stream(self):
-        """Stream beenden"""
-        self.streaming = False
-        self.start_stream_button.setEnabled(True)
-        self.end_stream_button.setEnabled(False)
-        self.live_icon_label.setVisible(False)
+    def emotion_slider_changed(self, value):
+        scrollbar = self.emotion_scroll.verticalScrollBar()
+        max_scroll = scrollbar.maximum()
+        scroll_position = int((value / 100.0) * max_scroll)
+        scrollbar.setValue(scroll_position)
     
-    def volume_changed(self, value):
-        """Lautstärke aktualisieren"""
-        self.volume_value_label.setText(f"{value}%")
-    
-    def sensitivity_changed(self, value):
-        """Sensitivity aktualisieren"""
-        self.sensitivity_value_label.setText(f"{value}%")
+    def gesture_slider_changed(self, value):
+        scrollbar = self.gesture_scroll.verticalScrollBar()
+        max_scroll = scrollbar.maximum()
+        scroll_position = int((value / 100.0) * max_scroll)
+        scrollbar.setValue(scroll_position)
     
     def update_frame(self):
         ret, frame = self.cap.read()
