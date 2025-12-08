@@ -16,7 +16,7 @@ SOUND_MAP_PATH = SOUNDS_DIR / "sound_map.json"
 SETUP_CONFIG_PATH = SETUP_DIR / "setup_config.json"
 
 # Setup toggles
-FACE_SETUP_ENABLED = False  # Set False to reuse snapshots and skip new recordings
+FACE_SETUP_ENABLED = True  # Set False to reuse snapshots and skip new recordings
 IMPORTANCE_TEST = "ablation"  # "ablation", "permutation", or "coef"
 PLOT_AU = True  # Debug: overlay AU landmark points on crops during setup/detection
 FACEMESH_DEBUG_STATS = True  # If True, log facemesh feature min/max/variance periodically

@@ -105,15 +105,18 @@ class RestFaceCalibrator:
             print("✖️ Setup cancelled (instructions not confirmed).")
             return False
 
+        selection_mode = emotions is None
+        use_selector = selector_emotions is not None or selection_mode
+
         cam = cv2.VideoCapture(0)
         cam.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         cam.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
         # Warm-up: Modelle/Kamera initialisieren, bevor Samples gezählt werden.
-        self._prepare_camera_window()
-        self._warmup_session(cam)
+        if not use_selector:
+            self._prepare_camera_window()
+        self._warmup_session(cam, show_preview=not use_selector)
 
-        selection_mode = emotions is None
         if selection_mode:
             self.profiles = {}
 
@@ -121,7 +124,6 @@ class RestFaceCalibrator:
         pending_order = [emotion for emotion, _ in targets]
         pending_map = dict(instruction_map)  # emotions still required at least once
 
-        use_selector = selector_emotions is not None or selection_mode
         selector_list = (
             list(selector_emotions) if selector_emotions is not None else list(instruction_map)
         )
@@ -211,18 +213,31 @@ class RestFaceCalibrator:
                             selector_ui.mark_completed(emotion)
                             if done_checker and done_checker():
                                 done_triggered = True
+                            elif selector_ui.remaining_emotions() == 0:
+                                # Auto-finish without requiring the user to press Stop/Done.
+                                try:
+                                    selector_ui._handle_done_clicked()  # type: ignore[attr-defined]
+                                except Exception:
+                                    pass
+                                done_triggered = True
                     break
                 if done_triggered:
                     break
             if selection_mode and selector_ui is not None and not pending_map:
-                self._wait_for_done_confirmation(qt_app, selector_ui)
+                # Auto-finish path skips manual Done/Stop requirement.
+                pass
         finally:
             cam.release()
             cv2.destroyAllWindows()
             if selector_ui is not None:
-                selector_ui.close()
-                if qt_app is not None:
-                    qt_app.processEvents()
+                try:
+                    selector_ui.close()
+                    if qt_app is not None:
+                        for _ in range(10):
+                            qt_app.processEvents()
+                            time.sleep(0.02)
+                except Exception:
+                    pass
 
         self.neutral_feature_mean = self._compute_neutral_feature_mean()
         self._save_snapshot()
@@ -424,10 +439,22 @@ class RestFaceCalibrator:
         if selector.remaining_emotions() > 0:
             return
         if selector.consume_done_request():
+            try:
+                selector.close()
+                if qt_app:
+                    qt_app.processEvents()
+            except Exception:
+                pass
             return
         print("✅ All emotions captured. Press 'Done' to continue.")
         while True:
             if selector.consume_done_request():
+                try:
+                    selector.close()
+                    if qt_app:
+                        qt_app.processEvents()
+                except Exception:
+                    pass
                 break
             if selector.is_aborted():
                 break
