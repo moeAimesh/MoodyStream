@@ -454,7 +454,7 @@ class EmotionSelectorWindow(QMainWindow):
         self._camera_index = 0  # Current camera index
         
         self.setWindowTitle("Emotion Profiling - Moody Setup")
-        self.setFixedSize(600, 700)
+        self.setFixedSize(700, 700)
         
         if position:
             self.move(*position)
@@ -591,7 +591,31 @@ class EmotionSelectorWindow(QMainWindow):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll.setStyleSheet("QScrollArea { border: none; }")
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+        scroll.setStyleSheet("""
+            QScrollArea { 
+                border: none; 
+            }
+            QScrollBar:vertical {
+                background-color: #161618;
+                width: 12px;
+                border-radius: 6px;
+            }
+            QScrollBar::handle:vertical {
+                background-color: #FFFFFF;
+                border-radius: 6px;
+                min-height: 20px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background-color: #818181;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+                background: none;
+            }
+        """)
         
         scroll_widget = QWidget()
         scroll_layout = QVBoxLayout(scroll_widget)
@@ -812,7 +836,31 @@ class InstructionsDialog(QDialog):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll.setStyleSheet("QScrollArea { border: none; }")
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+        scroll.setStyleSheet("""
+            QScrollArea { 
+                border: none; 
+            }
+            QScrollBar:vertical {
+                background-color: #161618;
+                width: 12px;
+                border-radius: 6px;
+            }
+            QScrollBar::handle:vertical {
+                background-color: #FFFFFF;
+                border-radius: 6px;
+                min-height: 20px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background-color: #818181;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+                background: none;
+            }
+        """)
         
         scroll_widget = QWidget()
         scroll_layout = QVBoxLayout(scroll_widget)
@@ -836,7 +884,7 @@ class InstructionsDialog(QDialog):
             # number badge
             number = QLabel(str(i))
             number.setStyleSheet("""
-                background-color: #2a2a2d;
+                background-color: #212124;
                 color: #FFFFFF;
                 font-size: 14px;
                 font-weight: bold;
