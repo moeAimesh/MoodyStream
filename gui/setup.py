@@ -1,6 +1,7 @@
 """
 Styled GUI components for the Moody setup wizard.
 Includes emotion selector window and instruction dialogs with modern dark theme.
+Updated with Pause and Reset functionality.
 """
 
 import sys
@@ -8,7 +9,7 @@ from typing import Optional, Sequence
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QDialog, QCheckBox, QScrollArea, QFrame,
-    QGraphicsDropShadowEffect, QComboBox
+    QGraphicsDropShadowEffect, QComboBox, QMessageBox
 )
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5 import QtGui, QtCore
@@ -70,6 +71,10 @@ MOODY_STYLESHEET = """
             stop:1 rgba(255, 105, 180, 0.5)
         );
     }
+    QPushButton:disabled {
+        background-color: #1a1a1c;
+        color: #666666;
+    }
     
     /* ComboBox - Elevated Layer mit Farbverlauf beim Hover */
     QComboBox {
@@ -107,162 +112,6 @@ MOODY_STYLESHEET = """
         border-radius: 6px;
         padding: 4px;
         outline: none;
-    }
-    
-    /* Slider - Custom Apple Style */
-    QSlider::groove:vertical {
-        background-color: #212124;
-        width: 4px;
-        border-radius: 2px;
-    }
-    QSlider::handle:vertical {
-        background-color: #FFFFFF;
-        width: 18px;
-        height: 18px;
-        margin: 0 -7px;
-        border-radius: 9px;
-        border: none;
-    }
-    QSlider::handle:vertical:hover {
-        background-color: #818181;
-    }
-    QSlider::groove:horizontal {
-        background-color: #212124;
-        height: 4px;
-        border-radius: 2px;
-    }
-    QSlider::handle:horizontal {
-        background-color: #FFFFFF;
-        width: 18px;
-        height: 18px;
-        margin: -7px 0;
-        border-radius: 9px;
-        border: none;
-    }
-    QSlider::handle:horizontal:hover {
-        background-color: #818181;
-    }
-    
-    /* SpinBox - Elevated Layer */
-    QSpinBox {
-        background-color: #212124;
-        color: #FFFFFF;
-        border: none;
-        border-radius: 6px;
-        padding: 6px 12px;
-        font-size: 13px;
-    }
-    QSpinBox:hover {
-        background-color: #818181;
-    }
-    QSpinBox::up-button, QSpinBox::down-button {
-        background-color: transparent;
-        border: none;
-        width: 16px;
-    }
-    QSpinBox::up-arrow {
-        image: none;
-        border-left: 4px solid transparent;
-        border-right: 4px solid transparent;
-        border-bottom: 5px solid #FFFFFF;
-    }
-    QSpinBox::down-arrow {
-        image: none;
-        border-left: 4px solid transparent;
-        border-right: 4px solid transparent;
-        border-top: 5px solid #FFFFFF;
-    }
-    
-    /* MenuBar - Darkest Layer */
-    QMenuBar {
-        background-color: #000000;
-        color: #FFFFFF;
-        border: none;
-        padding: 4px;
-        font-size: 13px;
-    }
-    QMenuBar::item {
-        background-color: transparent;
-        padding: 4px 12px;
-        border-radius: 4px;
-    }
-    QMenuBar::item:selected {
-        background-color: #212124;
-    }
-    QMenuBar::item:pressed {
-        background-color: #818181;
-    }
-    
-    /* Menu Dropdown */
-    QMenu {
-        background-color: #212124;
-        color: #FFFFFF;
-        border: 1px solid #000000;
-        border-radius: 8px;
-        padding: 4px;
-    }
-    QMenu::item {
-        padding: 6px 24px 6px 12px;
-        border-radius: 4px;
-    }
-    QMenu::item:selected {
-        background-color: #818181;
-    }
-    QMenu::separator {
-        height: 1px;
-        background-color: #000000;
-        margin: 4px 8px;
-    }
-    
-    /* MessageBox/Dialog */
-    QDialog {
-        background-color: #161618;
-        color: #FFFFFF;
-    }
-    QMessageBox {
-        background-color: #161618;
-        color: #FFFFFF;
-    }
-    QMessageBox QLabel {
-        color: #FFFFFF;
-    }
-    QMessageBox QPushButton {
-        min-width: 70px;
-    }
-    
-    /* FileDialog */
-    QFileDialog {
-        background-color: #161618;
-        color: #FFFFFF;
-    }
-    QFileDialog QWidget {
-        background-color: #161618;
-        color: #FFFFFF;
-    }
-    QFileDialog QPushButton {
-        background-color: #212124;
-        color: #FFFFFF;
-    }
-    QFileDialog QTreeView {
-        background-color: #161618;
-        color: #FFFFFF;
-        border: 1px solid #212124;
-    }
-    QFileDialog QListView {
-        background-color: #161618;
-        color: #FFFFFF;
-        border: 1px solid #212124;
-    }
-    QFileDialog QLineEdit {
-        background-color: #212124;
-        color: #FFFFFF;
-        border: 1px solid #000000;
-        border-radius: 4px;
-        padding: 4px;
-    }
-    QFileDialog QComboBox {
-        background-color: #212124;
-        color: #FFFFFF;
     }
     
     /* ScrollArea */
@@ -430,7 +279,6 @@ class EmotionButton(QPushButton):
             """)
 
 
-# 
 class EmotionSelectorWindow(QMainWindow):
     """
     Modern emotion selector for the setup wizard.
@@ -452,6 +300,8 @@ class EmotionSelectorWindow(QMainWindow):
         self._done_requested = False
         self._aborted = False
         self._camera_index = 0  # Current camera index
+        self._paused = False
+        self._reset_requested = False
         
         self.setWindowTitle("Emotion Profiling - Moody Setup")
         self.setFixedSize(700, 700)
@@ -474,12 +324,16 @@ class EmotionSelectorWindow(QMainWindow):
         top_bar = QHBoxLayout()
         top_bar.setSpacing(15)
         
-        # Logo
+        # Logo (placeholder - update path as needed)
         self.logo_label = QLabel()
-        logo_pixmap = QPixmap("/Users/juliamoor/Desktop/MoodyStream/gui/moody_logo.jpg")
-        if not logo_pixmap.isNull():
-            scaled_logo = logo_pixmap.scaled(40, 40, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            self.logo_label.setPixmap(scaled_logo)
+        # Use a fallback if logo doesn't exist
+        try:
+            logo_pixmap = QPixmap("/Users/juliamoor/Desktop/MoodyStream/gui/moody_logo.jpg")
+            if not logo_pixmap.isNull():
+                scaled_logo = logo_pixmap.scaled(40, 40, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                self.logo_label.setPixmap(scaled_logo)
+        except:
+            pass
         self.logo_label.setStyleSheet("""
             background-color: #212124;
             border-radius: 20px;
@@ -643,12 +497,24 @@ class EmotionSelectorWindow(QMainWindow):
         self.start_button.setEnabled(False)
         self.start_button.clicked.connect(self._on_start_clicked)
         
+        self.pause_button = QPushButton("Pause")
+        self.pause_button.setMinimumHeight(45)
+        self.pause_button.setEnabled(False)
+        self.pause_button.setCheckable(True)
+        self.pause_button.clicked.connect(self._on_pause_clicked)
+        
+        self.reset_button = QPushButton("Reset")
+        self.reset_button.setMinimumHeight(45)
+        self.reset_button.clicked.connect(self._on_reset_clicked)
+        
         self.done_button = QPushButton("Done")
         self.done_button.setMinimumHeight(45)
         self.done_button.setEnabled(False)
         self.done_button.clicked.connect(self._on_done_clicked)
         
         controls.addWidget(self.start_button, 2)
+        controls.addWidget(self.pause_button, 1)
+        controls.addWidget(self.reset_button, 1)
         controls.addWidget(self.done_button, 1)
         
         layout.addLayout(controls)
@@ -676,7 +542,63 @@ class EmotionSelectorWindow(QMainWindow):
         """Handle start button click"""
         self._start_requested = True
         self.start_button.setEnabled(False)
+        self.pause_button.setEnabled(True)
         self.status_label.setText("Recording in progress...")
+    
+    def _on_pause_clicked(self):
+        """Handle pause button click"""
+        self._paused = self.pause_button.isChecked()
+        if self._paused:
+            self.pause_button.setText("Resume")
+            self.status_label.setText("Recording paused")
+        else:
+            self.pause_button.setText("Pause")
+            self.status_label.setText("Recording resumed...")
+    
+    def _on_reset_clicked(self):
+        """Handle reset button click - resets only the current emotion"""
+        if not self.active_emotion:
+            self.status_label.setText("No active emotion to reset.")
+            return
+        
+        # Show confirmation dialog
+        reply = QMessageBox.question(
+            self,
+            'Reset Current Emotion',
+            f'Are you sure you want to reset the recording for "{self.active_emotion.capitalize()}"?\n\nPreviously recorded emotions will remain unchanged.',
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            self._reset_requested = True
+            current = self.active_emotion
+            
+            # Remove current emotion from completed
+            self.completed_emotions.discard(current)
+            
+            # Reset the current emotion button - keep it active for selection
+            if current in self.emotion_buttons:
+                self.emotion_buttons[current].set_completed(False)
+                self.emotion_buttons[current].set_active(True)  # Keep it selected
+            
+            # Keep the emotion as active so it can be re-recorded
+            # self.active_emotion stays the same
+            
+            # Enable start button so user can restart recording
+            self.start_button.setEnabled(True)
+            self.pause_button.setEnabled(False)
+            self.pause_button.setChecked(False)
+            self.pause_button.setText("Pause")
+            self._paused = False
+            
+            # Update done button state - should be disabled if not all complete
+            if len(self.completed_emotions) >= len(self.enabled_emotions):
+                self.done_button.setEnabled(True)
+            else:
+                self.done_button.setEnabled(False)
+            
+            self.status_label.setText(f'"{current.capitalize()}" reset. Click Start to re-record.')
     
     def _on_done_clicked(self):
         """Handle done button click"""
@@ -696,6 +618,17 @@ class EmotionSelectorWindow(QMainWindow):
         """Get current camera index"""
         return self._camera_index
     
+    def is_paused(self) -> bool:
+        """Check if recording is paused"""
+        return self._paused
+    
+    def consume_reset_request(self) -> Optional[str]:
+        """Check and consume reset request flag, returns the emotion that was reset"""
+        if self._reset_requested:
+            self._reset_requested = False
+            return self.active_emotion  # Return which emotion needs to be reset
+        return None
+    
     def set_active_emotion(self, emotion: str):
         """Set the currently active emotion"""
         self.active_emotion = emotion
@@ -708,11 +641,28 @@ class EmotionSelectorWindow(QMainWindow):
         self.completed_emotions.add(emotion)
         if emotion in self.emotion_buttons:
             self.emotion_buttons[emotion].set_completed(True)
+            self.emotion_buttons[emotion].set_active(False)  # Deactivate after completion
+        
+        # Clear active emotion after completion
+        if self.active_emotion == emotion:
+            self.active_emotion = None
+        
+        # Reset pause state when completing an emotion
+        self.pause_button.setEnabled(False)
+        self.pause_button.setChecked(False)
+        self.pause_button.setText("Pause")
+        self._paused = False
+        
+        # Reset start button for next emotion
+        self.start_button.setEnabled(False)
         
         # enable done button if all emotions are complete
         if len(self.completed_emotions) >= len(self.enabled_emotions):
             self.done_button.setEnabled(True)
             self.status_label.setText("All emotions recorded! Click Done to continue.")
+        else:
+            remaining = len(self.enabled_emotions) - len(self.completed_emotions)
+            self.status_label.setText(f"Emotion '{emotion}' completed! {remaining} remaining.")
     
     def take_selection(self) -> Optional[str]:
         """Get next emotion selection from queue"""
@@ -786,10 +736,13 @@ class InstructionsDialog(QDialog):
         
         # Logo
         self.logo_label = QLabel()
-        logo_pixmap = QPixmap("/Users/juliamoor/Desktop/MoodyStream/gui/moody_logo.jpg")
-        if not logo_pixmap.isNull():
-            scaled_logo = logo_pixmap.scaled(40, 40, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            self.logo_label.setPixmap(scaled_logo)
+        try:
+            logo_pixmap = QPixmap("/Users/juliamoor/Desktop/MoodyStream/gui/moody_logo.jpg")
+            if not logo_pixmap.isNull():
+                scaled_logo = logo_pixmap.scaled(40, 40, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                self.logo_label.setPixmap(scaled_logo)
+        except:
+            pass
         self.logo_label.setStyleSheet("""
             background-color: #212124;
             border-radius: 20px;
