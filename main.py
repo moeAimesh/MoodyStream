@@ -1,111 +1,78 @@
-"""Aufgabe: Startpunkt deiner App. Orchestriert den Ablauf:
-Setup-Assistent starten (Gesicht & Sounds),
-danach Live-Erkennung starten.
-Eingaben: keine.
-Ausgaben: startet Prozesse/Threads.
-Kernlogik (Pseudocode):
-if not setup_wizard():
-    exit()
-start_detection()
-Fehlerfälle betrachten: keine Kamera; fehlende Profile/Sounds → sauber melden und zum Setup zurückführen."""
-# python -m main
+"""
+main.py - Application entry point
+
+Workflow:
+1. Run setup wizard (if needed)
+2. Open main window
+3. User clicks "Detection: OFF" button to start camera
+"""
 
 import sys
 from pathlib import Path
-from PyQt5.QtWidgets import QApplication, QMessageBox
+from PyQt5.QtWidgets import QApplication
+from setup.setup_wizard import main as run_setup_wizard
+from gui.main_window import MainWindow
+
+
+def check_setup_complete():
+    """
+    Check if setup is complete by verifying 3 JSON files exist.
+    
+    Returns:
+        bool: True if all 3 JSON files exist, False otherwise
+    """
+    # Define the 3 required JSON files
+    required_files = [
+        "setup/rest_face_model.json",
+        "setup/setup_config.json", 
+        "setup/rest_face_model.profiles.snapshot.json.json"
+    ]
+    
+    print("🔍 Checking setup files...")
+    
+    all_exist = True
+    for file_path in required_files:
+        full_path = Path(file_path)
+        if full_path.exists():
+            print(f"  ✅ Found: {file_path}")
+        else:
+            print(f"  ❌ Missing: {file_path}")
+            all_exist = False
+    
+    return all_exist
 
 
 def main():
-    # Erstelle die Qt-Anwendung früh, damit GUI-Komponenten funktionieren
+    """Main entry point"""
+    # Create QApplication early (required for GUI)
     app = QApplication(sys.argv)
     
     print("🚀 Starting MoodyStream...")
     
-    # Setup-Wizard IMMER zuerst ausführen (mit GUI)
-    print("📋 Starte Setup-Wizard...")
+    # Check if setup is complete
+    setup_complete = check_setup_complete()
     
-    try:
-        from gui.setup import SetupWizard
+    if not setup_complete:
+        print("\n📋 Setup incomplete - launching setup wizard...")
+        # start setup
+        setup_wizard_success = run_setup_wizard()
+        if not setup_wizard_success:
+            print("❌ SetupWizard abgebrochen oder fehlgeschlagen.")
+            return
+    else:
+        print("\n✅ Setup complete - all files found!")
+    
+    # Launch main window
+    print("\n🎭 Opening main window...")
+    
+    window = MainWindow(camera_index=0)
+    window.show()
         
-        # Erstelle Setup-Wizard
-        setup_wizard = SetupWizard()
-        result = setup_wizard.exec_()  # Zeigt als Dialog
+    print("✅ Main window opened")
         
-        if result != setup_wizard.Accepted:
-            print("❌ Setup wurde abgebrochen.")
-            reply = QMessageBox.question(
-                None,
-                "Setup Cancelled",
-                "Setup was cancelled. Do you want to continue without setup?\n\n"
-                "Note: Detection may not work properly without setup.",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No
-            )
-            if reply == QMessageBox.No:
-                print("👋 Beende Anwendung...")
-                return 0
-            else:
-                print("⚠️ Fahre ohne Setup fort...")
-        else:
-            print("✅ Setup erfolgreich abgeschlossen!")
-    
-    except ImportError as e:
-        print(f"⚠️ Setup-Wizard nicht gefunden: {e}")
-        print("⚠️ Fahre ohne Setup fort...")
-    
-    except Exception as e:
-        print(f"❌ Fehler beim Setup: {e}")
-        import traceback
-        traceback.print_exc()
-        
-        reply = QMessageBox.question(
-            None,
-            "Setup Error",
-            f"An error occurred during setup:\n{e}\n\n"
-            "Do you want to continue anyway?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
-        )
-        if reply == QMessageBox.No:
-            return 1
-    
-    print("\n🎭 Starte Main Window...\n")
-    
-    # Importiere MainWindow
-    try:
-        from gui.main_window import MainWindow
-    except ImportError as e:
-        print(f"❌ Fehler beim Laden der GUI: {e}")
-        QMessageBox.critical(
-            None,
-            "Import Error",
-            f"Could not load the main window:\n{e}\n\n"
-            "Please check your installation."
-        )
-        return 1
-    
-    # Erstelle und zeige das Hauptfenster
-    try:
-        window = MainWindow()
-        window.show()
-        print("✅ MainWindow geöffnet!")
-        print("💡 Klicke auf 'Detection: OFF' um die Kamera zu starten.\n")
-    except Exception as e:
-        print(f"❌ Fehler beim Erstellen des Hauptfensters: {e}")
-        import traceback
-        traceback.print_exc()
-        QMessageBox.critical(
-            None,
-            "Startup Error",
-            f"Could not create the main window:\n{e}\n\n"
-            "Please try running the setup again."
-        )
-        return 1
-    
-    # Starte die Event-Loop (hält die App am Laufen)
-    print("🔄 Event-Loop läuft...")
+    # Run event loop
     return app.exec_()
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+     main()

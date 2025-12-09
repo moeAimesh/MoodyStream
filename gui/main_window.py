@@ -3,54 +3,21 @@ import os
 import cv2
 import pygame
 import threading
+import json
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QLabel, QScrollArea, QSlider,
                              QDialog, QSpinBox, QMenu, QFileDialog, QMessageBox)
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QObject
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal, pyqtSlot, QObject, QMetaObject, Q_ARG
 from PyQt5.QtGui import QPixmap, QImage
 import numpy as np
-
-# Import camera_stream - wir nutzen es direkt
+from setup.sound_setup import run_sound_setup
+# Import camera_stream
 try:
     from detection.camera_stream import start_detection
     DETECTION_AVAILABLE = True
 except ImportError as e:
     DETECTION_AVAILABLE = False
     print(f"Could not import detection module: {e}")
-
-
-class FrameReceiver(QObject):
-    """
-    Receives frames from camera_stream thread and emits them to GUI
-    """
-    frame_ready = pyqtSignal(np.ndarray)
-    
-    def __init__(self):
-        super().__init__()
-        self.latest_frame = None
-        self.lock = threading.Lock()
-    
-    def update_frame(self, frame):
-        """Called by camera_stream to provide new frame"""
-        with self.lock:
-            self.latest_frame = frame.copy() if frame is not None else None
-        self.frame_ready.emit(frame)
-    
-    def get_latest_frame(self):
-        """Get the latest frame (thread-safe)"""
-        with self.lock:
-            return self.latest_frame.copy() if self.latest_frame is not None else None
-        
-
-# Global frame receiver instance
-_frame_receiver = None
-
-def get_frame_receiver():
-    """Get the singleton frame receiver"""
-    global _frame_receiver
-    if _frame_receiver is None:
-        _frame_receiver = FrameReceiver()
-    return _frame_receiver
 
 
 class HoverBox(QWidget):
@@ -69,8 +36,11 @@ class HoverBox(QWidget):
         if not pygame.mixer.get_init():
             pygame.mixer.init()
         
-        self.setMinimumHeight(50)
-        self.setMaximumHeight(50)
+        # Load sound from config if available
+        self._load_sound_from_config()
+        
+        self.setMinimumHeight(38)  # Noch kleiner: 45 → 38
+        self.setMaximumHeight(38)  # Noch kleiner: 45 → 38
         self.setCursor(Qt.PointingHandCursor)
         
         self.setAttribute(Qt.WA_StyledBackground, True)
@@ -99,8 +69,8 @@ class HoverBox(QWidget):
                 color: #FFFFFF;
                 border: none;
                 border-radius: 4px;
-                padding: 4px 12px;
-                font-size: 11px;
+                padding: 3px 10px;
+                font-size: 10px;
             }
             QPushButton:hover {
                 background: qlineargradient(
@@ -119,7 +89,7 @@ class HoverBox(QWidget):
                 );
             }
         """)
-        self.play_button.setFixedHeight(30)
+        self.play_button.setFixedHeight(26)  # Kleiner: 30 → 26
         self.play_button.clicked.connect(self.on_play_button_clicked)
         layout.addWidget(self.play_button)
         
@@ -133,8 +103,8 @@ class HoverBox(QWidget):
                 color: #FFFFFF;
                 border: none;
                 border-radius: 4px;
-                padding: 4px 12px;
-                font-size: 11px;
+                padding: 3px 10px;
+                font-size: 10px;
             }
             QPushButton:hover {
                 background: qlineargradient(
@@ -153,11 +123,34 @@ class HoverBox(QWidget):
                 );
             }
         """)
-        self.sound_button.setFixedHeight(30)
+        self.sound_button.setFixedHeight(26)  # Kleiner: 30 → 26
         self.sound_button.clicked.connect(self.show_sound_menu)
         layout.addWidget(self.sound_button)
         
         layout.addSpacing(25)
+    
+    def _load_sound_from_config(self):
+        """Load sound file path from setup_config.json"""
+        try:
+            config_path = os.path.join(os.path.dirname(__file__), "setup_config.json")
+            if os.path.exists(config_path):
+                with open(config_path, 'r') as f:
+                    config = json.load(f)
+                    sounds = config.get("sounds", {})
+                    # Match emotion name (case insensitive)
+                    emotion_key = self.text.lower()
+                    if emotion_key in sounds:
+                        sound_path = sounds[emotion_key]
+                        # Convert relative path to absolute
+                        if not os.path.isabs(sound_path):
+                            sound_path = os.path.join(os.path.dirname(__file__), sound_path)
+                        if os.path.exists(sound_path):
+                            self.selected_sound_file = sound_path
+                            print(f"✅ Loaded sound for {self.text}: {sound_path}")
+                        else:
+                            print(f"⚠️ Sound file not found: {sound_path}")
+        except Exception as e:
+            print(f"⚠️ Could not load sound from config: {e}")
     
     def show_sound_menu(self):
         """Show dropdown menu for sound selection"""
@@ -196,6 +189,9 @@ class HoverBox(QWidget):
         """Handle Browse Web option"""
         print(f"Browse Web selected for {self.text}")
         self.sound_clicked.emit()
+        run_sound_setup()
+        # Reload sound after setup
+        self._load_sound_from_config()
     
     def browse_computer(self):
         """Handle Browse Computer option - open file dialog"""
@@ -300,8 +296,8 @@ class HoverBox(QWidget):
                 color: #FFFFFF;
                 border: none;
                 border-radius: 4px;
-                padding: 4px 12px;
-                font-size: 11px;
+                padding: 3px 10px;
+                font-size: 10px;
             }}
             QPushButton:hover {{
                 background: qlineargradient(
@@ -340,7 +336,7 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Settings")
         self.setModal(True)
-        self.setFixedSize(400, 200)
+        self.setFixedSize(400, 280)  # Größer: 200 → 280 für Volume Slider
         
         self.setStyleSheet("""
             QDialog {
@@ -404,6 +400,22 @@ class SettingsDialog(QDialog):
                 border-right: 4px solid transparent;
                 border-top: 5px solid #FFFFFF;
             }
+            QSlider::groove:horizontal {
+                background-color: #2a2a2d;
+                height: 10px;
+                border-radius: 5px;
+            }
+            QSlider::handle:horizontal {
+                background-color: #FFFFFF;
+                width: 40px;
+                height: 16px;
+                margin: -3px 0;
+                border-radius: 8px;
+                border: none;
+            }
+            QSlider::handle:horizontal:hover {
+                background-color: #d0d0d0;
+            }
         """)
         
         layout = QVBoxLayout(self)
@@ -423,6 +435,28 @@ class SettingsDialog(QDialog):
         camera_layout.addStretch()
         
         layout.addLayout(camera_layout)
+        
+        # Volume Slider
+        volume_layout = QHBoxLayout()
+        volume_label = QLabel("Volume:")
+        volume_layout.addWidget(volume_label)
+        
+        self.volume_slider = QSlider(Qt.Horizontal)
+        self.volume_slider.setMinimum(0)
+        self.volume_slider.setMaximum(100)
+        self.volume_slider.setValue(50)  # Default: 50%
+        self.volume_slider.setFixedWidth(200)
+        self.volume_slider.valueChanged.connect(self.update_volume)
+        volume_layout.addWidget(self.volume_slider)
+        
+        self.volume_value_label = QLabel("50%")
+        self.volume_value_label.setFixedWidth(40)
+        self.volume_value_label.setStyleSheet("color: #FFFFFF; font-size: 13px;")
+        volume_layout.addWidget(self.volume_value_label)
+        
+        volume_layout.addStretch()
+        
+        layout.addLayout(volume_layout)
         
         restart_layout = QHBoxLayout()
         restart_button = QPushButton("Restart Setup")
@@ -448,6 +482,12 @@ class SettingsDialog(QDialog):
     def get_camera_index(self):
         return self.camera_spinbox.value()
     
+    def update_volume(self, value):
+        """Update volume label and pygame mixer volume"""
+        self.volume_value_label.setText(f"{value}%")
+        # Set pygame mixer volume (0.0 to 1.0)
+        pygame.mixer.music.set_volume(value / 100.0)
+    
     def restart_setup(self):
         """Emit signal to restart setup"""
         self.restart_setup_signal.emit()
@@ -455,10 +495,13 @@ class SettingsDialog(QDialog):
 
 
 class MainWindow(QMainWindow):
+    # Signal for thread-safe frame updates
+    frame_ready = pyqtSignal(object)  # Will carry QPixmap
+    
     def __init__(self, camera_index=0):
         super().__init__()
         self.setWindowTitle("Moodystream")
-        self.setGeometry(100, 100, 1400, 800)
+        self.setGeometry(100, 100, 1400, 800)  # Zurück auf 800px
         
         # Get the directory where this file is located
         self.base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -474,15 +517,15 @@ class MainWindow(QMainWindow):
         self.detection_thread = None
         self.emotion_detection_active = True  # Detection state
         
-        # Get frame receiver
-        self.frame_receiver = get_frame_receiver()
+        # Initialize pygame mixer for sound playback
+        if not pygame.mixer.get_init():
+            pygame.mixer.init()
+            pygame.mixer.music.set_volume(0.5)  # Default 50% volume
+        
+        # Connect signal for frame updates
+        self.frame_ready.connect(self._update_camera_display)
         
         self._setup_ui()
-        
-        # Timer for updating display (läuft immer)
-        self.display_timer = QTimer()
-        self.display_timer.timeout.connect(self.update_display)
-        self.display_timer.start(33)  # ~30 FPS display update
         
         # DON'T start detection automatically - let user click button
         # This prevents crashes on startup
@@ -536,7 +579,7 @@ class MainWindow(QMainWindow):
                 );
             }
             QSlider::groove:horizontal {
-                background-color: #161618;
+                background-color: #2a2a2d;
                 height: 10px;
                 border-radius: 5px;
             }
@@ -549,7 +592,7 @@ class MainWindow(QMainWindow):
                 border: none;
             }
             QSlider::handle:horizontal:hover {
-                background-color: #818181;
+                background-color: #d0d0d0;
             }
             QScrollArea {
                 background-color: transparent;
@@ -625,23 +668,23 @@ class MainWindow(QMainWindow):
         # Top controls
         top_controls = self._create_top_controls()
         center_layout.addLayout(top_controls)
-        center_layout.addSpacing(10)
+        center_layout.addSpacing(5)  # Noch weniger: 8 → 5
         
         # Camera display
         self.camera_label = QLabel()
         self.camera_label.setStyleSheet(
             "background-color: #000000; border: 1px solid #212124; border-radius: 8px;"
         )
-        self.camera_label.setFixedSize(640, 320)
+        self.camera_label.setFixedSize(520, 260)  # Noch kleiner: 560x280 → 520x260
         self.camera_label.setAlignment(Qt.AlignCenter)
-        self.camera_label.setText("Starting camera...")
+        self.camera_label.setText("Click 'Detection: ON' to start camera")
         center_layout.addWidget(self.camera_label, 0, Qt.AlignHCenter)
-        center_layout.addSpacing(20)
+        center_layout.addSpacing(10)  # Noch weniger: 15 → 10
         
         # Emotions section
         emotions_section = self._create_emotions_section()
         center_layout.addLayout(emotions_section)
-        center_layout.addSpacing(20)
+        center_layout.addSpacing(8)  # Noch weniger: 12 → 8
         
         # Gestures section
         gestures_section = self._create_gestures_section()
@@ -677,17 +720,17 @@ class MainWindow(QMainWindow):
         
         # Settings button
         self.settings_button = QPushButton("⚙ Settings")
-        self.settings_button.setFixedSize(100, 32)
+        self.settings_button.setFixedSize(120, 32)  # Breiter: 100 → 120
         self.settings_button.clicked.connect(self.open_settings)
         top_controls.addWidget(self.settings_button)
         
         top_controls.addSpacing(10)
         
-        # Detection toggle button (mit schönem Farbverlauf!)
+        # Detection toggle button
         self.emotion_detection_button = QPushButton("Detection: OFF")
         self.emotion_detection_button.setFixedSize(140, 32)
         self.emotion_detection_button.setCheckable(True)
-        self.emotion_detection_button.setChecked(False)  # Start OFF, user clicks to start
+        self.emotion_detection_button.setChecked(False)
         self.emotion_detection_button.clicked.connect(self.toggle_emotion_detection)
         self.emotion_detection_button.setStyleSheet("""
             QPushButton {
@@ -744,6 +787,25 @@ class MainWindow(QMainWindow):
         emotion_trigger_time_label.setStyleSheet("font-size: 11px;")
         emotions_header.addWidget(emotion_trigger_time_label)
         
+        # Info icon for Trigger Time
+        trigger_time_info = QLabel("ⓘ")
+        trigger_time_info.setStyleSheet("""
+            QLabel {
+                color: #888888;
+                font-size: 14px;
+                background: transparent;
+                border: none;
+            }
+            QLabel:hover {
+                color: #FFFFFF;
+            }
+        """)
+        trigger_time_info.setToolTip("How long should the bot wait to play a sound")
+        trigger_time_info.setCursor(Qt.WhatsThisCursor)
+        emotions_header.addWidget(trigger_time_info)
+        
+        emotions_header.addSpacing(5)
+        
         self.emotion_trigger_slider = QSlider(Qt.Horizontal)
         self.emotion_trigger_slider.setMinimum(0)
         self.emotion_trigger_slider.setMaximum(100)
@@ -758,6 +820,25 @@ class MainWindow(QMainWindow):
         sensitivity_label.setStyleSheet("font-size: 11px;")
         emotions_header.addWidget(sensitivity_label)
         
+        # Info icon for Sensitivity
+        sensitivity_info = QLabel("ⓘ")
+        sensitivity_info.setStyleSheet("""
+            QLabel {
+                color: #888888;
+                font-size: 14px;
+                background: transparent;
+                border: none;
+            }
+            QLabel:hover {
+                color: #FFFFFF;
+            }
+        """)
+        sensitivity_info.setToolTip("How confident should the bot be to play a sound")
+        sensitivity_info.setCursor(Qt.WhatsThisCursor)
+        emotions_header.addWidget(sensitivity_info)
+        
+        emotions_header.addSpacing(5)
+        
         self.emotion_sensitivity_slider = QSlider(Qt.Horizontal)
         self.emotion_sensitivity_slider.setMinimum(0)
         self.emotion_sensitivity_slider.setMaximum(100)
@@ -766,28 +847,16 @@ class MainWindow(QMainWindow):
         emotions_header.addWidget(self.emotion_sensitivity_slider)
         
         emotions_layout.addLayout(emotions_header)
+        emotions_layout.addSpacing(5)
         
         # Emotion boxes
-        emotion_container = QWidget()
-        emotion_layout = QVBoxLayout(emotion_container)
-        emotion_layout.setSpacing(8)
-        emotion_layout.setContentsMargins(0, 0, 0, 0)
-        
         emotion_names = ["Happy", "Surprise", "Sad", "Fear"]
-        for name in emotion_names:
+        for i, name in enumerate(emotion_names):
             box = HoverBox(name)
             box.setMinimumWidth(775)
-            emotion_layout.addWidget(box)
-        
-        # Scroll Area
-        self.emotion_scroll = QScrollArea()
-        self.emotion_scroll.setWidget(emotion_container)
-        self.emotion_scroll.setWidgetResizable(False)
-        self.emotion_scroll.setFixedHeight(150)
-        self.emotion_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.emotion_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
-        
-        emotions_layout.addWidget(self.emotion_scroll)
+            emotions_layout.addWidget(box)
+            if i < len(emotion_names) - 1: 
+                emotions_layout.addSpacing(4)
         
         return emotions_layout
     
@@ -808,6 +877,25 @@ class MainWindow(QMainWindow):
         gesture_sensitivity_label.setStyleSheet("font-size: 11px;")
         gestures_header.addWidget(gesture_sensitivity_label)
         
+        # Info icon for Sensitivity
+        gesture_sensitivity_info = QLabel("ⓘ")
+        gesture_sensitivity_info.setStyleSheet("""
+            QLabel {
+                color: #888888;
+                font-size: 14px;
+                background: transparent;
+                border: none;
+            }
+            QLabel:hover {
+                color: #FFFFFF;
+            }
+        """)
+        gesture_sensitivity_info.setToolTip("How confident should the bot be to play a sound")
+        gesture_sensitivity_info.setCursor(Qt.WhatsThisCursor)
+        gestures_header.addWidget(gesture_sensitivity_info)
+        
+        gestures_header.addSpacing(5)
+        
         self.gesture_sensitivity_slider = QSlider(Qt.Horizontal)
         self.gesture_sensitivity_slider.setMinimum(0)
         self.gesture_sensitivity_slider.setMaximum(100)
@@ -816,142 +904,185 @@ class MainWindow(QMainWindow):
         gestures_header.addWidget(self.gesture_sensitivity_slider)
         
         gestures_layout.addLayout(gestures_header)
+        gestures_layout.addSpacing(5)
         
-        # Gesture boxes - directly added without ScrollArea
+        # Gesture boxes
         gesture_names = ["Thumbs up", "Thumbs down", "Peace"]
-        for name in gesture_names:
+        for i, name in enumerate(gesture_names):
             box = HoverBox(name)
             box.setMinimumWidth(775)
             gestures_layout.addWidget(box)
+            if i < len(gesture_names) - 1:  
+                gestures_layout.addSpacing(4)
         
         return gestures_layout
     
     def start_detection_thread(self):
-        """Start camera and detection using QTimer (macOS-safe)"""
+        """Start detection in a separate thread with custom frame handling"""
         if self.detection_running:
-            print("Detection already running")
+            print("⚠ Detection already running")
             return
         
-        try:
-            print("🎥 Starting detection...")
-            
-            # Import detection modules
-            from detection.emotion_recognition import EmotionRecognition
-            from detection.gesture_recognition import detect_gestures
-            from detection.single_face_tracker import SingleFaceTracker
-            from detection.preprocessing import preprocess_face
-            from detection.facemesh_features import extract_facemesh_features
-            from detection.gesture_mapper import get_sound_for_gestures
-            from detection.emotion_mapper import get_sound_for_emotions
-            from sounds.play_sound import play
-            from collections import defaultdict
-            import time
-            
-            # Open camera in MAIN thread (macOS requirement!)
-            self.cap = cv2.VideoCapture(self.camera_index)
-            if not self.cap.isOpened():
-                raise RuntimeError(f"Cannot open camera {self.camera_index}")
-            
-            # Initialize detection objects
-            self.er = EmotionRecognition(threshold=10)
-            self.tracker = SingleFaceTracker()
-            self.last_emotions = defaultdict(lambda: None)
-            self.thumb_start_time = None
-            self.sound_played = False
-            
-            # Create processing function
-            def process_frame():
-                """Process one frame (runs in main thread via QTimer)"""
-                if not self.cap or not self.cap.isOpened():
-                    self.stop_detection_internal()
-                    return
-                
-                try:
-                    ret, frame = self.cap.read()
-                    if not ret:
-                        return
-                    
-                    now = time.time()
-                    
-                    # Update tracker
-                    tracks = self.tracker.update(frame, 0, now)
-                    
-                    # Gesture detection
-                    gestures = detect_gestures(frame)
-                    current_time = time.time()
-                    
-                    if gestures:
-                        if self.thumb_start_time is None:
-                            self.thumb_start_time = current_time
-                            self.sound_played = False
-                        elif (current_time - self.thumb_start_time) >= 1 and not self.sound_played:
-                            g_key, g_path = get_sound_for_gestures(gestures)
-                            if g_path:
-                                play(g_path)
-                            self.sound_played = True
-                    else:
-                        self.thumb_start_time = None
-                        self.sound_played = False
-                    
-                    # Emotion detection (simplified - no threading needed)
-                    for track in tracks.values():
-                        crop = preprocess_face(frame, track.bbox)
-                        if crop is not None:
-                            features = extract_facemesh_features(frame, track.bbox)
-                            emotion = self.er.analyze_frame(crop, features=features, track_id=track.track_id)
-                            track.emotion = emotion
-                            
-                            # Play sound on emotion change
-                            current_emotion = emotion or "neutral"
-                            last = self.last_emotions[track.track_id]
-                            if current_emotion != last and current_emotion != "neutral":
-                                s_key, s_path = get_sound_for_emotions([current_emotion])
-                                if s_path:
-                                    play(s_path)
-                                self.last_emotions[track.track_id] = current_emotion
-                            elif last is None:
-                                self.last_emotions[track.track_id] = current_emotion
-                    
-                    # Draw on frame
-                    for track in tracks.values():
-                        x, y, w, h = track.bbox
-                        cv2.rectangle(frame, (x, y), (x + w, y + h), track.color, 2)
-                        label = track.emotion or "neutral"
-                        cv2.putText(frame, label, (x, max(20, y - 10)),
-                                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, track.color, 2)
-                    
-                    if "thumbsup" in gestures:
-                        cv2.putText(frame, "👍 Thumbs up detected!", (15, 50),
-                                   cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-                    
-                    # Send frame to display
-                    self.frame_receiver.update_frame(frame)
-                
-                except Exception as e:
-                    print(f"⚠️ Frame processing error: {e}")
-            
-            # Start QTimer to process frames (runs in main thread!)
-            self.detection_timer = QTimer()
-            self.detection_timer.timeout.connect(process_frame)
-            self.detection_timer.start(33)  # ~30 FPS
-            
-            self.detection_running = True
-            print("✅ Detection started successfully")
+        self.detection_running = True
         
+        def detection_worker():
+            import time
+            try:
+                print(f"🎥 Starting camera with index {self.camera_index}")
+                
+                # Import detection functions
+                from detection.emotion_recognition import EmotionRecognition
+                from detection.face_detection import detect_faces
+                from detection.gesture_recognition import detect_gestures
+                
+                cap = cv2.VideoCapture(self.camera_index)
+                if not cap.isOpened():
+                    print(f"❌ ERROR: Could not open camera {self.camera_index}")
+                    raise RuntimeError(f"Camera index {self.camera_index} could not be opened.")
+                
+                print("✅ Camera opened successfully")
+                
+                # Set camera to 60 FPS if supported
+                cap.set(cv2.CAP_PROP_FPS, 60)
+                actual_fps = cap.get(cv2.CAP_PROP_FPS)
+                print(f"📹 Camera FPS: {actual_fps}")
+                
+                er = EmotionRecognition(threshold=10)
+                frame_count = 0
+                
+                # Store last known face positions
+                last_faces = []
+                last_gestures = []
+                
+                print("🔄 Starting frame capture loop...")
+                
+                while self.detection_running:
+                    ret, frame = cap.read()
+                    if not ret:
+                        print("❌ Failed to read frame")
+                        break
+                    
+                    frame_count += 1
+                    
+                    # Debug: Print every 30 frames
+                    if frame_count % 30 == 0:
+                        print(f"📸 Frame {frame_count} captured, shape: {frame.shape}")
+                    
+                    # Run face detection every 3rd frame (save performance)
+                    if frame_count % 3 == 0:
+                        try:
+                            last_faces = detect_faces(frame)
+                            
+                            if last_faces and frame_count % 30 == 0:
+                                print(f"😊 Detected {len(last_faces)} face(s)")
+                        except Exception as e:
+                            print(f"⚠️ Face detection error: {e}")
+                    
+                    # Run gesture detection every 5th frame
+                    if frame_count % 5 == 0:
+                        try:
+                            last_gestures = detect_gestures(frame)
+                        except Exception as e:
+                            print(f"⚠️ Gesture detection error: {e}")
+                    
+                    # Send frame to GUI for display
+                    self._queue_frame_display(frame)
+                    
+                    # No sleep - let it run as fast as possible (60 FPS)
+                
+                cap.release()
+                print("🛑 Camera released")
+                
+            except Exception as e:
+                print(f"❌ Detection thread error: {e}")
+                import traceback
+                traceback.print_exc()
+                self.detection_running = False
+        
+        self.detection_thread = threading.Thread(target=detection_worker, daemon=True)
+        self.detection_thread.start()
+        print("✅ Detection thread started")
+    
+    def _queue_frame_display(self, frame):
+        """Queue a frame for display in the GUI thread (thread-safe)"""
+        try:
+            # Debug counter
+            if not hasattr(self, '_frame_display_count'):
+                self._frame_display_count = 0
+            self._frame_display_count += 1
+            
+            # Print every 30 frames
+            if self._frame_display_count % 30 == 0:
+                print(f"🖼️  Queue frame #{self._frame_display_count} for display")
+            
+            # Convert frame in worker thread
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            h, w, ch = frame_rgb.shape
+            
+            if self._frame_display_count % 30 == 0:
+                print(f"   Frame converted: {w}x{h}x{ch}")
+            
+            bytes_per_line = ch * w
+            qt_image = QImage(frame_rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
+            # Make a copy so the data doesn't get freed
+            qt_image = qt_image.copy()
+            pixmap = QPixmap.fromImage(qt_image)
+            
+            if self._frame_display_count % 30 == 0:
+                print(f"   Pixmap created: {pixmap.width()}x{pixmap.height()}")
+            
+            # Emit signal (automatically thread-safe!)
+            self.frame_ready.emit(pixmap)
+            
+            if self._frame_display_count % 30 == 0:
+                print(f"   ✅ Signal emitted")
+                
         except Exception as e:
-            print(f"❌ Failed to start detection: {e}")
+            print(f"❌ Frame display error: {e}")
             import traceback
             traceback.print_exc()
-            self.detection_running = False
+    
+    @pyqtSlot(object)
+    def _update_camera_display(self, pixmap):
+        """Update camera display (called in main GUI thread)"""
+        try:
+            if not hasattr(self, '_gui_update_count'):
+                self._gui_update_count = 0
+            self._gui_update_count += 1
+            
+            if self._gui_update_count % 30 == 0:
+                print(f"🖥️  GUI Update #{self._gui_update_count}")
+                print(f"   Received pixmap: {pixmap.width()}x{pixmap.height()}")
+                print(f"   Label size: {self.camera_label.width()}x{self.camera_label.height()}")
+            
+            scaled_pixmap = pixmap.scaled(
+                self.camera_label.size(),
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation
+            )
+            
+            if self._gui_update_count % 30 == 0:
+                print(f"   Scaled to: {scaled_pixmap.width()}x{scaled_pixmap.height()}")
+            
+            self.camera_label.setPixmap(scaled_pixmap)
+            
+            if self._gui_update_count % 30 == 0:
+                print(f"   ✅ Pixmap set on label!")
+                
+        except Exception as e:
+            print(f"❌ Display update error: {e}")
+            import traceback
+            traceback.print_exc()
     
     def stop_detection_internal(self):
         """Internal method to stop detection"""
-        if hasattr(self, 'detection_timer'):
-            self.detection_timer.stop()
-        if hasattr(self, 'cap') and self.cap:
-            self.cap.release()
-            self.cap = None
         self.detection_running = False
+        
+        # Wait for detection thread to finish
+        if self.detection_thread and self.detection_thread.is_alive():
+            print("⏳ Waiting for detection thread to stop...")
+            self.detection_thread.join(timeout=2)
+        
         print("🛑 Detection stopped")
     
     def toggle_emotion_detection(self):
@@ -977,28 +1108,6 @@ class MainWindow(QMainWindow):
             # Stop detection
             self.stop_detection_internal()
     
-    def update_display(self):
-        """Update the camera display with latest frame from detection"""
-        frame = self.frame_receiver.get_latest_frame()
-        
-        if frame is not None:
-            self._display_frame(frame)
-    
-    def _display_frame(self, frame):
-        """Display a frame in the camera label"""
-        # Convert BGR to RGB
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        h, w, ch = frame_rgb.shape
-        bytes_per_line = ch * w
-        qt_image = QImage(frame_rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
-        pixmap = QPixmap.fromImage(qt_image)
-        scaled_pixmap = pixmap.scaled(
-            self.camera_label.size(),
-            Qt.KeepAspectRatio,
-            Qt.SmoothTransformation
-        )
-        self.camera_label.setPixmap(scaled_pixmap)
-    
     def open_settings(self):
         """Open settings dialog"""
         dialog = SettingsDialog(self.camera_index, self)
@@ -1012,18 +1121,6 @@ class MainWindow(QMainWindow):
     def handle_restart_setup(self):
         """Handle restart setup signal from settings dialog"""
         print("Restart Setup wird durchgeführt...")
-    
-    def closeEvent(self, event):
-        """Clean up on close"""
-        self.display_timer.stop()
-        self.detection_running = False
-        
-        # Give detection thread time to clean up
-        if self.detection_thread and self.detection_thread.is_alive():
-            print("Waiting for detection thread...")
-            self.detection_thread.join(timeout=2)
-        
-        event.accept()
     
     def closeEvent(self, event):
         """Clean shutdown when window closes"""
