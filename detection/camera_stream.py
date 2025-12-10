@@ -8,7 +8,7 @@ import time
 from collections import defaultdict, deque
 import math
 from itertools import count
-from typing import Dict, Optional
+from typing import Dict, Optional, Callable
 
 import cv2
 import matplotlib.pyplot as plt
@@ -87,16 +87,19 @@ def start_detection(
     virtual_cam_width: Optional[int] = None,
     virtual_cam_height: Optional[int] = None,
     virtual_cam_fps: Optional[int] = None,
+    frame_callback: Optional[Callable[[np.ndarray], None]] = None,
+    stop_event: Optional[threading.Event] = None,
+    show_fps_plot: bool = False,  # only activate when necessary otherwise gui will crash
 ):
     cap = cv2.VideoCapture(camera_index)
     if not cap.isOpened():
-        raise RuntimeError(f"Kamera-Index {camera_index} konnte nicht geöffnet werden.")
+        raise RuntimeError(f"Kamera-Index {camera_index} konnte nicht geÃ¶ffnet werden.")
     thumb_start_time = None
     sound_played = False
     
 
     er = EmotionRecognition(threshold=10)
-    print("🎥 Kamera gestartet – Gesten- und Emotionserkennung aktiv!")
+    print("ðŸŽ¥ Kamera gestartet â€“ Gesten- und Emotionserkennung aktiv!")
 
     emotion_jobs: "queue.Queue[tuple]" = queue.Queue(maxsize=8)
     emotion_results: "queue.Queue[tuple]" = queue.Queue()
@@ -140,6 +143,11 @@ def start_detection(
 
     try:
         while True:
+            # check for stop event
+            if stop_event and stop_event.is_set():
+                print("🛑 Stop event detected at loop start - breaking")
+                break
+            
             loop_start = time.perf_counter()
             ret, frame_full = cap.read()
             if not ret:
@@ -173,6 +181,11 @@ def start_detection(
                     FACE_DETECT_INTERVAL_SINGLE,
                     default_emotion,
                 )
+            
+            # check for stop event
+            if stop_event and stop_event.is_set():
+                print("🛑 Stop event detected after face detection - breaking")
+                break
 
             elapsed_before_gesture = (time.perf_counter() - loop_start) * 1000
             fps_before_gesture = 1000 / elapsed_before_gesture if elapsed_before_gesture else 0
@@ -203,6 +216,11 @@ def start_detection(
             else:
                 thumb_start_time = None
                 sound_played = False
+            
+            # check for stop event
+            if stop_event and stop_event.is_set():
+                print("🛑 Stop event detected after gesture detection - breaking")
+                break
 
             elapsed_before = (time.perf_counter() - loop_start) * 1000
             fps_before = 1000 / elapsed_before if elapsed_before else 0
@@ -247,7 +265,7 @@ def start_detection(
             except queue.Empty:
                 pass
 
-            #Emotion-Sounds über Mapper (pro Track, bei Änderung & != neutral)
+            #Emotion-Sounds Ã¼ber Mapper (pro Track, bei Ã„nderung & != neutral)
             for track in tracks.values():
                 current_emotion = track.emotion or default_emotion
                 last = last_emotions[track.track_id]
@@ -257,9 +275,14 @@ def start_detection(
                         play(s_path)
                     last_emotions[track.track_id] = current_emotion
                 else:
-                    #einmal setzen, damit spätere Vergleiche stabil sind
+                    #einmal setzen, damit spÃ¤tere Vergleiche stabil sind
                     if last is None:
                         last_emotions[track.track_id] = current_emotion
+            
+            # check for stop event 
+            if stop_event and stop_event.is_set():
+                print("🛑 Stop event detected after emotion sounds - breaking")
+                break
             
             for track in tracks.values():
                 x, y, w, h = track.bbox
@@ -279,7 +302,7 @@ def start_detection(
             if "thumbsup" in gestures:
                 cv2.putText(
                     frame_full,
-                    "👍 Daumen hoch erkannt!",
+                    "ðŸ‘ Daumen hoch erkannt!",
                     (15, 50),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.8,
@@ -300,6 +323,10 @@ def start_detection(
                 2,
             )
 
+            # callback for gui
+            if frame_callback is not None:
+                frame_callback(frame_full)
+
             key = -1
             if show_window:
                 cv2.imshow(window_name, frame_full)
@@ -310,6 +337,10 @@ def start_detection(
 
             if virtual_cam_publisher:
                 virtual_cam_publisher.send(frame_full)
+
+            # stop event to stop detection
+            if stop_event and stop_event.is_set():
+                break
 
             if key == 27:
                 break
@@ -324,8 +355,11 @@ def start_detection(
         if virtual_cam_publisher:
             virtual_cam_publisher.close()
         cv2.destroyAllWindows()
-        print("🛑 Erkennung gestoppt.")
-        visualise_avg_fps()
+        print("ðŸ›‘ Erkennung gestoppt.")
+        
+        # plot only when necessary otherwise gui will crash
+        if show_fps_plot:
+            visualise_avg_fps()
 
 
 def update_multi_face_tracks(
