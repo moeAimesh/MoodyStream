@@ -5,12 +5,13 @@ import pygame
 import threading
 import json
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                             QHBoxLayout, QPushButton, QLabel, QScrollArea, QSlider,
-                             QDialog, QSpinBox, QMenu, QFileDialog, QMessageBox)
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal, pyqtSlot, QObject, QMetaObject, Q_ARG
+                             QHBoxLayout, QPushButton, QLabel, QSlider,
+                             QDialog, QSpinBox, QMenu, QFileDialog)
+from PyQt5.QtCore import Qt, pyqtSignal, pyqtSlot
 from PyQt5.QtGui import QPixmap, QImage
-import numpy as np
+import numpy
 from setup.sound_setup import run_sound_setup
+
 # Import camera_stream
 try:
     from detection.camera_stream import start_detection
@@ -39,8 +40,8 @@ class HoverBox(QWidget):
         # Load sound from config if available
         self._load_sound_from_config()
         
-        self.setMinimumHeight(38)  # Noch kleiner: 45 → 38
-        self.setMaximumHeight(38)  # Noch kleiner: 45 → 38
+        self.setMinimumHeight(38)
+        self.setMaximumHeight(38)  
         self.setCursor(Qt.PointingHandCursor)
         
         self.setAttribute(Qt.WA_StyledBackground, True)
@@ -89,7 +90,7 @@ class HoverBox(QWidget):
                 );
             }
         """)
-        self.play_button.setFixedHeight(26)  # Kleiner: 30 → 26
+        self.play_button.setFixedHeight(26)
         self.play_button.clicked.connect(self.on_play_button_clicked)
         layout.addWidget(self.play_button)
         
@@ -123,7 +124,7 @@ class HoverBox(QWidget):
                 );
             }
         """)
-        self.sound_button.setFixedHeight(26)  # Kleiner: 30 → 26
+        self.sound_button.setFixedHeight(26)
         self.sound_button.clicked.connect(self.show_sound_menu)
         layout.addWidget(self.sound_button)
         
@@ -146,11 +147,11 @@ class HoverBox(QWidget):
                             sound_path = os.path.join(os.path.dirname(__file__), sound_path)
                         if os.path.exists(sound_path):
                             self.selected_sound_file = sound_path
-                            print(f"✅ Loaded sound for {self.text}: {sound_path}")
+                            print(f"âœ… Loaded sound for {self.text}: {sound_path}")
                         else:
-                            print(f"⚠️ Sound file not found: {sound_path}")
+                            print(f"âš ï¸ Sound file not found: {sound_path}")
         except Exception as e:
-            print(f"⚠️ Could not load sound from config: {e}")
+            print(f"âš ï¸ Could not load sound from config: {e}")
     
     def show_sound_menu(self):
         """Show dropdown menu for sound selection"""
@@ -330,13 +331,12 @@ class HoverBox(QWidget):
 class SettingsDialog(QDialog):
     """Settings dialog for camera configuration"""
     
-    restart_setup_signal = pyqtSignal()
-    
     def __init__(self, current_camera_index, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Settings")
         self.setModal(True)
-        self.setFixedSize(400, 280)  # Größer: 200 → 280 für Volume Slider
+        self.setFixedSize(400, 280)  # GrÃ¶ÃŸer: 200 â†’ 280 fÃ¼r Volume Slider
+        self.restart_setup_requested = False  # Flag to track if restart was clicked
         
         self.setStyleSheet("""
             QDialog {
@@ -365,6 +365,14 @@ class SettingsDialog(QDialog):
                 );
             }
             QPushButton:pressed {
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba(255, 107, 74, 0.5),
+                    stop:0.5 rgba(255, 59, 143, 0.5),
+                    stop:1 rgba(255, 105, 180, 0.5)
+                );
+            }
+            QPushButton:checked {
                 background: qlineargradient(
                     x1:0, y1:0, x2:1, y2:1,
                     stop:0 rgba(255, 107, 74, 0.5),
@@ -459,9 +467,10 @@ class SettingsDialog(QDialog):
         layout.addLayout(volume_layout)
         
         restart_layout = QHBoxLayout()
-        restart_button = QPushButton("Restart Setup")
-        restart_button.clicked.connect(self.restart_setup)
-        restart_layout.addWidget(restart_button)
+        self.restart_button = QPushButton("Restart Setup")
+        self.restart_button.setCheckable(True)  # Make it checkable so it can stay "pressed"
+        self.restart_button.clicked.connect(self.restart_setup)
+        restart_layout.addWidget(self.restart_button)
         restart_layout.addStretch()
         
         layout.addLayout(restart_layout)
@@ -489,19 +498,21 @@ class SettingsDialog(QDialog):
         pygame.mixer.music.set_volume(value / 100.0)
     
     def restart_setup(self):
-        """Emit signal to restart setup"""
-        self.restart_setup_signal.emit()
-        print("Restart Setup clicked - Setup wird neu gestartet")
+        """Mark that restart setup was requested"""
+        self.restart_setup_requested = True
+        self.restart_button.setChecked(True)  # Visually mark the button as active
+        print("Restart Setup marked - will execute after OK is pressed")
 
 
 class MainWindow(QMainWindow):
     # Signal for thread-safe frame updates
     frame_ready = pyqtSignal(object)  # Will carry QPixmap
+    restart_setup_signal = pyqtSignal() # Will tell Appcontroller in main.py to restart the setup
     
     def __init__(self, camera_index=0):
         super().__init__()
         self.setWindowTitle("Moodystream")
-        self.setGeometry(100, 100, 1400, 800)  # Zurück auf 800px
+        self.setGeometry(100, 100, 1400, 800)  # ZurÃ¼ck auf 800px
         
         # Get the directory where this file is located
         self.base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -529,7 +540,7 @@ class MainWindow(QMainWindow):
         
         # DON'T start detection automatically - let user click button
         # This prevents crashes on startup
-        print("✅ MainWindow initialized. Click 'Detection: ON' to start camera.")
+        print("âœ… MainWindow initialized. Click 'Detection: ON' to start camera.")
     
     def _get_main_stylesheet(self):
         """Returns the main stylesheet for the window"""
@@ -668,23 +679,23 @@ class MainWindow(QMainWindow):
         # Top controls
         top_controls = self._create_top_controls()
         center_layout.addLayout(top_controls)
-        center_layout.addSpacing(5)  # Noch weniger: 8 → 5
+        center_layout.addSpacing(5) 
         
         # Camera display
         self.camera_label = QLabel()
         self.camera_label.setStyleSheet(
             "background-color: #000000; border: 1px solid #212124; border-radius: 8px;"
         )
-        self.camera_label.setFixedSize(520, 260)  # Noch kleiner: 560x280 → 520x260
+        self.camera_label.setFixedSize(520, 260)
         self.camera_label.setAlignment(Qt.AlignCenter)
         self.camera_label.setText("Click 'Detection: ON' to start camera")
         center_layout.addWidget(self.camera_label, 0, Qt.AlignHCenter)
-        center_layout.addSpacing(10)  # Noch weniger: 15 → 10
+        center_layout.addSpacing(10)
         
         # Emotions section
         emotions_section = self._create_emotions_section()
         center_layout.addLayout(emotions_section)
-        center_layout.addSpacing(8)  # Noch weniger: 12 → 8
+        center_layout.addSpacing(8)
         
         # Gestures section
         gestures_section = self._create_gestures_section()
@@ -704,7 +715,7 @@ class MainWindow(QMainWindow):
             scaled_logo = logo_pixmap.scaled(40, 40, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             self.logo_label.setPixmap(scaled_logo)
         else:
-            self.logo_label.setText("🎭")
+            self.logo_label.setText("ðŸŽ­")
             self.logo_label.setStyleSheet("font-size: 30px;")
         self.logo_label.setFixedSize(40, 40)
         top_controls.addWidget(self.logo_label)
@@ -719,8 +730,8 @@ class MainWindow(QMainWindow):
         top_controls.addStretch()
         
         # Settings button
-        self.settings_button = QPushButton("⚙ Settings")
-        self.settings_button.setFixedSize(120, 32)  # Breiter: 100 → 120
+        self.settings_button = QPushButton("âš™ Settings")
+        self.settings_button.setFixedSize(120, 32)
         self.settings_button.clicked.connect(self.open_settings)
         top_controls.addWidget(self.settings_button)
         
@@ -788,7 +799,7 @@ class MainWindow(QMainWindow):
         emotions_header.addWidget(emotion_trigger_time_label)
         
         # Info icon for Trigger Time
-        trigger_time_info = QLabel("ⓘ")
+        trigger_time_info = QLabel("â“˜")
         trigger_time_info.setStyleSheet("""
             QLabel {
                 color: #888888;
@@ -821,7 +832,7 @@ class MainWindow(QMainWindow):
         emotions_header.addWidget(sensitivity_label)
         
         # Info icon for Sensitivity
-        sensitivity_info = QLabel("ⓘ")
+        sensitivity_info = QLabel("â“˜")
         sensitivity_info.setStyleSheet("""
             QLabel {
                 color: #888888;
@@ -878,7 +889,7 @@ class MainWindow(QMainWindow):
         gestures_header.addWidget(gesture_sensitivity_label)
         
         # Info icon for Sensitivity
-        gesture_sensitivity_info = QLabel("ⓘ")
+        gesture_sensitivity_info = QLabel("â“˜")
         gesture_sensitivity_info.setStyleSheet("""
             QLabel {
                 color: #888888;
@@ -920,7 +931,7 @@ class MainWindow(QMainWindow):
     def start_detection_thread(self):
         """Start detection in a separate thread with custom frame handling"""
         if self.detection_running:
-            print("⚠ Detection already running")
+            print("âš  Detection already running")
             return
         
         self.detection_running = True
@@ -928,7 +939,7 @@ class MainWindow(QMainWindow):
         def detection_worker():
             import time
             try:
-                print(f"🎥 Starting camera with index {self.camera_index}")
+                print(f"ðŸŽ¥ Starting camera with index {self.camera_index}")
                 
                 # Import detection functions
                 from detection.emotion_recognition import EmotionRecognition
@@ -937,15 +948,15 @@ class MainWindow(QMainWindow):
                 
                 cap = cv2.VideoCapture(self.camera_index)
                 if not cap.isOpened():
-                    print(f"❌ ERROR: Could not open camera {self.camera_index}")
+                    print(f"âŒ ERROR: Could not open camera {self.camera_index}")
                     raise RuntimeError(f"Camera index {self.camera_index} could not be opened.")
                 
-                print("✅ Camera opened successfully")
+                print("âœ… Camera opened successfully")
                 
                 # Set camera to 60 FPS if supported
                 cap.set(cv2.CAP_PROP_FPS, 60)
                 actual_fps = cap.get(cv2.CAP_PROP_FPS)
-                print(f"📹 Camera FPS: {actual_fps}")
+                print(f"ðŸ“¹ Camera FPS: {actual_fps}")
                 
                 er = EmotionRecognition(threshold=10)
                 frame_count = 0
@@ -954,19 +965,19 @@ class MainWindow(QMainWindow):
                 last_faces = []
                 last_gestures = []
                 
-                print("🔄 Starting frame capture loop...")
+                print("ðŸ”„ Starting frame capture loop...")
                 
                 while self.detection_running:
                     ret, frame = cap.read()
                     if not ret:
-                        print("❌ Failed to read frame")
+                        print("âŒ Failed to read frame")
                         break
                     
                     frame_count += 1
                     
                     # Debug: Print every 30 frames
                     if frame_count % 30 == 0:
-                        print(f"📸 Frame {frame_count} captured, shape: {frame.shape}")
+                        print(f"ðŸ“¸ Frame {frame_count} captured, shape: {frame.shape}")
                     
                     # Run face detection every 3rd frame (save performance)
                     if frame_count % 3 == 0:
@@ -974,16 +985,16 @@ class MainWindow(QMainWindow):
                             last_faces = detect_faces(frame)
                             
                             if last_faces and frame_count % 30 == 0:
-                                print(f"😊 Detected {len(last_faces)} face(s)")
+                                print(f"ðŸ˜Š Detected {len(last_faces)} face(s)")
                         except Exception as e:
-                            print(f"⚠️ Face detection error: {e}")
+                            print(f"âš ï¸ Face detection error: {e}")
                     
                     # Run gesture detection every 5th frame
                     if frame_count % 5 == 0:
                         try:
                             last_gestures = detect_gestures(frame)
                         except Exception as e:
-                            print(f"⚠️ Gesture detection error: {e}")
+                            print(f"âš ï¸ Gesture detection error: {e}")
                     
                     # Send frame to GUI for display
                     self._queue_frame_display(frame)
@@ -991,17 +1002,17 @@ class MainWindow(QMainWindow):
                     # No sleep - let it run as fast as possible (60 FPS)
                 
                 cap.release()
-                print("🛑 Camera released")
+                print("ðŸ›‘ Camera released")
                 
             except Exception as e:
-                print(f"❌ Detection thread error: {e}")
+                print(f"âŒ Detection thread error: {e}")
                 import traceback
                 traceback.print_exc()
                 self.detection_running = False
         
         self.detection_thread = threading.Thread(target=detection_worker, daemon=True)
         self.detection_thread.start()
-        print("✅ Detection thread started")
+        print("âœ… Detection thread started")
     
     def _queue_frame_display(self, frame):
         """Queue a frame for display in the GUI thread (thread-safe)"""
@@ -1013,7 +1024,7 @@ class MainWindow(QMainWindow):
             
             # Print every 30 frames
             if self._frame_display_count % 30 == 0:
-                print(f"🖼️  Queue frame #{self._frame_display_count} for display")
+                print(f"ðŸ–¼ï¸  Queue frame #{self._frame_display_count} for display")
             
             # Convert frame in worker thread
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -1035,10 +1046,10 @@ class MainWindow(QMainWindow):
             self.frame_ready.emit(pixmap)
             
             if self._frame_display_count % 30 == 0:
-                print(f"   ✅ Signal emitted")
+                print(f"   âœ… Signal emitted")
                 
         except Exception as e:
-            print(f"❌ Frame display error: {e}")
+            print(f"âŒ Frame display error: {e}")
             import traceback
             traceback.print_exc()
     
@@ -1051,7 +1062,7 @@ class MainWindow(QMainWindow):
             self._gui_update_count += 1
             
             if self._gui_update_count % 30 == 0:
-                print(f"🖥️  GUI Update #{self._gui_update_count}")
+                print(f"ðŸ–¥ï¸  GUI Update #{self._gui_update_count}")
                 print(f"   Received pixmap: {pixmap.width()}x{pixmap.height()}")
                 print(f"   Label size: {self.camera_label.width()}x{self.camera_label.height()}")
             
@@ -1067,10 +1078,10 @@ class MainWindow(QMainWindow):
             self.camera_label.setPixmap(scaled_pixmap)
             
             if self._gui_update_count % 30 == 0:
-                print(f"   ✅ Pixmap set on label!")
+                print(f"   âœ… Pixmap set on label!")
                 
         except Exception as e:
-            print(f"❌ Display update error: {e}")
+            print(f"âŒ Display update error: {e}")
             import traceback
             traceback.print_exc()
     
@@ -1080,23 +1091,23 @@ class MainWindow(QMainWindow):
         
         # Wait for detection thread to finish
         if self.detection_thread and self.detection_thread.is_alive():
-            print("⏳ Waiting for detection thread to stop...")
+            print("â³ Waiting for detection thread to stop...")
             self.detection_thread.join(timeout=2)
         
-        print("🛑 Detection stopped")
+        print("ðŸ›‘ Detection stopped")
     
     def toggle_emotion_detection(self):
         """Toggle emotion detection on/off"""
         self.emotion_detection_active = self.emotion_detection_button.isChecked()
         if self.emotion_detection_active:
             self.emotion_detection_button.setText("Detection: ON")
-            print("✅ Starting detection...")
+            print("âœ… Starting detection...")
             # Start detection when button is turned ON
             if DETECTION_AVAILABLE and not self.detection_running:
                 try:
                     self.start_detection_thread()
                 except Exception as e:
-                    print(f"❌ Could not start detection: {e}")
+                    print(f"âŒ Could not start detection: {e}")
                     import traceback
                     traceback.print_exc()
                     self.emotion_detection_button.setChecked(False)
@@ -1104,30 +1115,34 @@ class MainWindow(QMainWindow):
                     self.emotion_detection_button.setText("Detection: OFF")
         else:
             self.emotion_detection_button.setText("Detection: OFF")
-            print("⏸ Stopping detection...")
+            print("â¸ Stopping detection...")
             # Stop detection
             self.stop_detection_internal()
     
     def open_settings(self):
         """Open settings dialog"""
         dialog = SettingsDialog(self.camera_index, self)
-        dialog.restart_setup_signal.connect(self.handle_restart_setup)
         
         if dialog.exec_() == QDialog.Accepted:
             new_camera_index = dialog.get_camera_index()
             if new_camera_index != self.camera_index:
                 print(f"Camera index changed to {new_camera_index}")
+            
+            # Check if restart setup was requested
+            if dialog.restart_setup_requested:
+                self.handle_restart_setup()
     
     def handle_restart_setup(self):
         """Handle restart setup signal from settings dialog"""
         print("Restart Setup wird durchgeführt...")
+        self.restart_setup_signal.emit()
     
     def closeEvent(self, event):
         """Clean shutdown when window closes"""
-        print("🛑 Closing MainWindow...")
+        print("ðŸ›‘ Closing MainWindow...")
         self.stop_detection_internal()
         event.accept()
-        print("✅ MainWindow closed cleanly")
+        print("âœ… MainWindow closed cleanly")
 
 
 if __name__ == "__main__":

@@ -23,16 +23,41 @@ Sounds je Verhalten/Emotion zuordnen,
 alles in Profil-JSON speichern.
 """
 #python -m setup.setup_wizard
+import sys
+from PyQt5.QtCore import QObject, pyqtSignal
+from PyQt5.QtWidgets import QApplication, QMessageBox
 
+from gui.setup import show_setup_instructions
 from .sound_setup import run_sound_setup
 from .face_setup import RestFaceCalibrator
 from utils.settings import FACE_SETUP_ENABLED, REST_FACE_MODEL_PATH
 
 
+
+class SetupController(QObject):
+    finished = pyqtSignal(bool)   # True = success, False = cancelled
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+    def start(self):
+        """Starts the entire setup wizard as a GUI-driven process."""
+
+        # Run the actual setup tasks
+        if not run_rest_face_setup(user="default"):
+            self.finished.emit(False)
+            return
+
+        # if not run_sound_setup(user="default"):
+            # self.finished.emit(False)
+            # return
+
+        # Setup successful
+        self.finished.emit(True)
+
 def _show_repeat_popup(message: str) -> None:
     """Show a small info popup; fallback to console if GUI fails."""
     try:
-        from PyQt5.QtWidgets import QApplication, QMessageBox
 
         app = QApplication.instance() or QApplication([])
         QMessageBox.information(None, "Moody Setup", message)
@@ -126,21 +151,12 @@ def run_rest_face_setup(user="default", force_record=None):
     print("✅ Rest-Face-Modell erfolgreich erstellt.")
     return True
 
-
-def main():
-    print("🚀 Starting Moody Setup Wizard...")
-
-    if not run_rest_face_setup(user="default"):
-        print("✖️ Rest-Face-Setup abgebrochen.")
-        return False
-
-    if not run_sound_setup(user="default"):
-        print("✖️ Sound-Setup abgebrochen.")
-        return False
-
-    print("✅ Setup vollständig abgeschlossen.")
-    return True
-
-
 if __name__ == "__main__":
-    main()
+    app = QApplication(sys.argv)
+
+    controller = SetupController()
+    controller.finished.connect(lambda success: print("Setup erfolgreich" if success else "Abgebrochen"))
+
+    controller.start()
+
+    sys.exit(app.exec_())
