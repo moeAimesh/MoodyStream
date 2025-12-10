@@ -7,10 +7,9 @@ import json
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QLabel, QSlider,
                              QDialog, QSpinBox, QMenu, QFileDialog)
-from PyQt5.QtCore import Qt, pyqtSignal, pyqtSlot
-from PyQt5.QtGui import QPixmap, QImage
+from PyQt5.QtCore import Qt, pyqtSignal, pyqtSlot, QUrl
+from PyQt5.QtGui import QPixmap, QImage, QDesktopServices
 import numpy
-from setup.sound_setup import run_sound_setup
 
 # Import camera_stream
 try:
@@ -190,9 +189,7 @@ class HoverBox(QWidget):
         """Handle Browse Web option"""
         print(f"Browse Web selected for {self.text}")
         self.sound_clicked.emit()
-        run_sound_setup()
-        # Reload sound after setup
-        self._load_sound_from_config()
+        QDesktopServices.openUrl(QUrl("https://www.myinstants.com"))
     
     def browse_computer(self):
         """Handle Browse Computer option - open file dialog"""
