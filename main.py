@@ -43,6 +43,10 @@ class AppController:
 
     def __init__(self):
         self.app = QApplication(sys.argv)
+        
+        # CRITICAL: Don't quit when the last window closes
+        # This allows us to close setup windows and open main window without app exiting
+        self.app.setQuitOnLastWindowClosed(False)
 
         self.main_window = None
         self.settings_dialog = None
@@ -65,16 +69,30 @@ class AppController:
     def open_setup_wizard(self):
         """Open Setup Wizard and clean up MainWindow if needed."""
         print("🧙 Opening Setup Wizard...")
-        
+
+        # Close settings dialog if open
+        if self.settings_dialog is not None:
+            print("🛑 Closing Settings Dialog...")
+            self.settings_dialog.close()
+            self.settings_dialog = None
+
         # Properly close main window using closeEvent
         if self.main_window is not None:
             print("🛑 Properly closing MainWindow before wizard restart...")
-            
-            # Call closeEvent directly - this will stop detection threads cleanly
+            # Set flag to prevent double closeEvent
+            self.main_window._is_closing = True
+            # Stop detection manually without calling closeEvent
+            self.main_window.stop_detection_internal()
+            # Now close the window (closeEvent will skip cleanup due to flag)
             self.main_window.close()
-            # If closeEvent accepted 
             self.main_window = None
             print("✅ MainWindow closed cleanly")
+            
+            # IMPORTANT: Give the camera time to fully release
+            import time
+            print("⏳ Waiting for camera to release...")
+            time.sleep(0.5)  # Wait 500ms for camera to fully release
+            self.app.processEvents()  # Process any pending events
 
         # Create wizard controller
         self.wizard_controller = SetupController()
@@ -105,10 +123,28 @@ class AppController:
         # Create / show main window
         self.main_window = MainWindow(camera_index=0)
 
+        # Save reference to settings dialog if needed
+        self.main_window.settings_dialog = None
+
         # IMPORTANT: connect restart setup
         self.main_window.restart_setup_signal.connect(self.open_setup_wizard)
 
+        # Override MainWindow.open_settings to capture the settings dialog
+        original_open_settings = self.main_window.open_settings
+
+        def open_settings_override():
+            original_open_settings()
+            self.settings_dialog = self.main_window.findChild(type(self.main_window.settings_dialog), "")
+            # Fallback if not found
+            if self.settings_dialog is None:
+                print("⚠️ Settings dialog reference not captured")
+        self.main_window.open_settings = open_settings_override
+
         self.main_window.show()
+        
+        # CRITICAL: Ensure the window stays visible and processes events
+        self.app.processEvents()
+        print("✅ Main Window is now active and visible")
 
     # ------------------------------------------------------------------
     #  Start Event Loop

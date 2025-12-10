@@ -7,9 +7,10 @@ import json
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QLabel, QSlider,
                              QDialog, QSpinBox, QMenu, QFileDialog)
-from PyQt5.QtCore import Qt, pyqtSignal, pyqtSlot, QUrl
-from PyQt5.QtGui import QPixmap, QImage, QDesktopServices
+from PyQt5.QtCore import Qt, pyqtSignal, pyqtSlot
+from PyQt5.QtGui import QPixmap, QImage
 import numpy
+from setup.sound_setup import run_sound_setup
 
 # Import camera_stream
 try:
@@ -189,9 +190,9 @@ class HoverBox(QWidget):
         """Handle Browse Web option"""
         print(f"Browse Web selected for {self.text}")
         self.sound_clicked.emit()
-        
-        # Website öffnen
-        QDesktopServices.openUrl(QUrl("https://www.myinstants.com"))
+        run_sound_setup()
+        # Reload sound after setup
+        self._load_sound_from_config()
     
     def browse_computer(self):
         """Handle Browse Computer option - open file dialog"""
@@ -330,12 +331,16 @@ class HoverBox(QWidget):
 class SettingsDialog(QDialog):
     """Settings dialog for camera configuration"""
     
+    restart_setup_signal = pyqtSignal()
+    
     def __init__(self, current_camera_index, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Settings")
         self.setModal(True)
         self.setFixedSize(400, 280)  # GrÃ¶ÃŸer: 200 â†’ 280 fÃ¼r Volume Slider
-        self.restart_setup_requested = False  # Flag to track if restart was clicked
+        
+        # Track if restart setup was requested
+        self._restart_setup_requested = False
         
         self.setStyleSheet("""
             QDialog {
@@ -364,14 +369,6 @@ class SettingsDialog(QDialog):
                 );
             }
             QPushButton:pressed {
-                background: qlineargradient(
-                    x1:0, y1:0, x2:1, y2:1,
-                    stop:0 rgba(255, 107, 74, 0.5),
-                    stop:0.5 rgba(255, 59, 143, 0.5),
-                    stop:1 rgba(255, 105, 180, 0.5)
-                );
-            }
-            QPushButton:checked {
                 background: qlineargradient(
                     x1:0, y1:0, x2:1, y2:1,
                     stop:0 rgba(255, 107, 74, 0.5),
@@ -467,7 +464,6 @@ class SettingsDialog(QDialog):
         
         restart_layout = QHBoxLayout()
         self.restart_button = QPushButton("Restart Setup")
-        self.restart_button.setCheckable(True)  # Make it checkable so it can stay "pressed"
         self.restart_button.clicked.connect(self.restart_setup)
         restart_layout.addWidget(self.restart_button)
         restart_layout.addStretch()
@@ -497,11 +493,48 @@ class SettingsDialog(QDialog):
         pygame.mixer.music.set_volume(value / 100.0)
     
     def restart_setup(self):
-        """Mark that restart setup was requested"""
-        self.restart_setup_requested = True
-        self.restart_button.setChecked(True)  # Visually mark the button as active
+        """Mark restart setup as requested and update button appearance"""
+        self._restart_setup_requested = True
+        
+        # Change button background to show it's been activated (same gradient as other active buttons)
+        self.restart_button.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba(255, 107, 74, 0.5),
+                    stop:0.5 rgba(255, 59, 143, 0.5),
+                    stop:1 rgba(255, 105, 180, 0.5)
+                );
+                color: #FFFFFF;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-size: 13px;
+                min-width: 80px;
+            }
+            QPushButton:hover {
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba(255, 107, 74, 0.6),
+                    stop:0.5 rgba(255, 59, 143, 0.6),
+                    stop:1 rgba(255, 105, 180, 0.6)
+                );
+            }
+            QPushButton:pressed {
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba(255, 107, 74, 0.7),
+                    stop:0.5 rgba(255, 59, 143, 0.7),
+                    stop:1 rgba(255, 105, 180, 0.7)
+                );
+            }
+        """)
         print("Restart Setup marked - will execute after OK is pressed")
-
+    
+    def is_restart_setup_requested(self):
+        """Check if restart setup was requested"""
+        return self._restart_setup_requested
+        
 
 class MainWindow(QMainWindow):
     # Signal for thread-safe frame updates
@@ -511,7 +544,11 @@ class MainWindow(QMainWindow):
     def __init__(self, camera_index=0):
         super().__init__()
         self.setWindowTitle("Moodystream")
-        self.setGeometry(100, 100, 1400, 800)  # ZurÃ¼ck auf 800px
+        self.setGeometry(100, 100, 1400, 800)  # Zurück auf 800px
+        
+        # CRITICAL: Set window flags to ensure it stays as top-level widget
+        # This prevents the app from closing when other windows close
+        self.setAttribute(Qt.WA_QuitOnClose, True)
         
         # Get the directory where this file is located
         self.base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -714,7 +751,7 @@ class MainWindow(QMainWindow):
             scaled_logo = logo_pixmap.scaled(40, 40, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             self.logo_label.setPixmap(scaled_logo)
         else:
-            self.logo_label.setText("M")
+            self.logo_label.setText("ðŸŽ­")
             self.logo_label.setStyleSheet("font-size: 30px;")
         self.logo_label.setFixedSize(40, 40)
         top_controls.addWidget(self.logo_label)
@@ -729,7 +766,7 @@ class MainWindow(QMainWindow):
         top_controls.addStretch()
         
         # Settings button
-        self.settings_button = QPushButton("⚙ Settings")
+        self.settings_button = QPushButton("âš™ Settings")
         self.settings_button.setFixedSize(120, 32)
         self.settings_button.clicked.connect(self.open_settings)
         top_controls.addWidget(self.settings_button)
@@ -798,7 +835,7 @@ class MainWindow(QMainWindow):
         emotions_header.addWidget(emotion_trigger_time_label)
         
         # Info icon for Trigger Time
-        trigger_time_info = QLabel("ⓘ")
+        trigger_time_info = QLabel("â“˜")
         trigger_time_info.setStyleSheet("""
             QLabel {
                 color: #888888;
@@ -831,7 +868,7 @@ class MainWindow(QMainWindow):
         emotions_header.addWidget(sensitivity_label)
         
         # Info icon for Sensitivity
-        sensitivity_info = QLabel("ⓘ")
+        sensitivity_info = QLabel("â“˜")
         sensitivity_info.setStyleSheet("""
             QLabel {
                 color: #888888;
@@ -888,7 +925,7 @@ class MainWindow(QMainWindow):
         gestures_header.addWidget(gesture_sensitivity_label)
         
         # Info icon for Sensitivity
-        gesture_sensitivity_info = QLabel("ⓘ")
+        gesture_sensitivity_info = QLabel("â“˜")
         gesture_sensitivity_info.setStyleSheet("""
             QLabel {
                 color: #888888;
@@ -1128,8 +1165,9 @@ class MainWindow(QMainWindow):
                 print(f"Camera index changed to {new_camera_index}")
             
             # Check if restart setup was requested
-            if dialog.restart_setup_requested:
-                self.handle_restart_setup()
+            if dialog.is_restart_setup_requested():
+                print("Restart Setup wird durchgeführt...")
+                self.restart_setup_signal.emit()
     
     def handle_restart_setup(self):
         """Handle restart setup signal from settings dialog"""
@@ -1138,10 +1176,21 @@ class MainWindow(QMainWindow):
     
     def closeEvent(self, event):
         """Clean shutdown when window closes"""
-        print("ðŸ›‘ Closing MainWindow...")
+        # Check if we're already closing to prevent double execution
+        if hasattr(self, '_is_closing') and self._is_closing:
+            print("⏭️  Skipping closeEvent (already closing)")
+            event.accept()
+            return
+            
+        print("🛑 Closing MainWindow...")
+        self._is_closing = True
         self.stop_detection_internal()
         event.accept()
-        print("âœ… MainWindow closed cleanly")
+        print("✅ MainWindow closed cleanly")
+        
+        # IMPORTANT: Quit the application when main window closes
+        from PyQt5.QtWidgets import QApplication
+        QApplication.instance().quit()
 
 
 if __name__ == "__main__":
