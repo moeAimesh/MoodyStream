@@ -7,10 +7,9 @@ import json
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QLabel, QSlider,
                              QDialog, QSpinBox, QMenu, QFileDialog)
-from PyQt5.QtCore import Qt, pyqtSignal, pyqtSlot
-from PyQt5.QtGui import QPixmap, QImage
+from PyQt5.QtCore import Qt, pyqtSignal, pyqtSlot, QUrl
+from PyQt5.QtGui import QPixmap, QImage, QDesktopServices
 import numpy
-from setup.sound_setup import run_sound_setup
 
 # Import camera_stream
 try:
@@ -190,9 +189,9 @@ class HoverBox(QWidget):
         """Handle Browse Web option"""
         print(f"Browse Web selected for {self.text}")
         self.sound_clicked.emit()
-        run_sound_setup()
-        # Reload sound after setup
-        self._load_sound_from_config()
+        
+        # Website öffnen
+        QDesktopServices.openUrl(QUrl("https://www.myinstants.com"))
     
     def browse_computer(self):
         """Handle Browse Computer option - open file dialog"""
@@ -715,7 +714,7 @@ class MainWindow(QMainWindow):
             scaled_logo = logo_pixmap.scaled(40, 40, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             self.logo_label.setPixmap(scaled_logo)
         else:
-            self.logo_label.setText("ðŸŽ­")
+            self.logo_label.setText("M")
             self.logo_label.setStyleSheet("font-size: 30px;")
         self.logo_label.setFixedSize(40, 40)
         top_controls.addWidget(self.logo_label)
@@ -730,7 +729,7 @@ class MainWindow(QMainWindow):
         top_controls.addStretch()
         
         # Settings button
-        self.settings_button = QPushButton("âš™ Settings")
+        self.settings_button = QPushButton("⚙ Settings")
         self.settings_button.setFixedSize(120, 32)
         self.settings_button.clicked.connect(self.open_settings)
         top_controls.addWidget(self.settings_button)
@@ -799,7 +798,7 @@ class MainWindow(QMainWindow):
         emotions_header.addWidget(emotion_trigger_time_label)
         
         # Info icon for Trigger Time
-        trigger_time_info = QLabel("â“˜")
+        trigger_time_info = QLabel("ⓘ")
         trigger_time_info.setStyleSheet("""
             QLabel {
                 color: #888888;
@@ -832,7 +831,7 @@ class MainWindow(QMainWindow):
         emotions_header.addWidget(sensitivity_label)
         
         # Info icon for Sensitivity
-        sensitivity_info = QLabel("â“˜")
+        sensitivity_info = QLabel("ⓘ")
         sensitivity_info.setStyleSheet("""
             QLabel {
                 color: #888888;
@@ -889,7 +888,7 @@ class MainWindow(QMainWindow):
         gestures_header.addWidget(gesture_sensitivity_label)
         
         # Info icon for Sensitivity
-        gesture_sensitivity_info = QLabel("â“˜")
+        gesture_sensitivity_info = QLabel("ⓘ")
         gesture_sensitivity_info.setStyleSheet("""
             QLabel {
                 color: #888888;
