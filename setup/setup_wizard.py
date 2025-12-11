@@ -48,10 +48,6 @@ class SetupController(QObject):
             self.finished.emit(False)
             return
 
-        # if not run_sound_setup(user="default"):
-            # self.finished.emit(False)
-            # return
-
         # Setup successful
         self.finished.emit(True)
 

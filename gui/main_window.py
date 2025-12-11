@@ -1,5 +1,6 @@
 import sys
 import os
+import traceback
 import cv2
 import pygame
 import threading
@@ -10,9 +11,16 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QDialog, QSpinBox, QMenu, QFileDialog)
 from PyQt5.QtCore import Qt, pyqtSignal, pyqtSlot, QUrl
 from PyQt5.QtGui import QPixmap, QImage, QDesktopServices
-import numpy
+from pathlib import Path
+from sounds.play_sound import play as play_sound 
+from utils.json_manager import save_json, update_json
 
-# Import camera_stream für komplette Detection-Pipeline
+SOUND_CACHE_DIR = Path("sounds/sound_cache")
+SETUP_CONFIG_PATH = Path("setup_config.json")
+SOUND_MAP_PATH = Path("sounds/sound_map.json")
+SOUND_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+# import camera_stream
 try:
     from detection.camera_stream import start_detection
     DETECTION_AVAILABLE = True
@@ -20,6 +28,18 @@ except ImportError as e:
     DETECTION_AVAILABLE = False
     print(f"Could not import detection module: {e}")
 
+
+# match gesture button text to gesture detection
+def normalize_gesture_name(gesture_name: str) -> str:
+    """
+    Normalize gesture names to match the detection format.
+    
+    Examples:
+        'Thumbs up' -> 'thumbsup'
+        'Thumbs down' -> 'thumbsdown'
+        'Peace' -> 'peace'
+    """
+    return gesture_name.lower().replace(" ", "")
 
 class HoverBox(QWidget):
     """Custom widget that changes color on hover"""
@@ -30,14 +50,13 @@ class HoverBox(QWidget):
     def __init__(self, text, parent=None):
         super().__init__(parent)
         self.text = text
+        self.emotion_key = text.lower()  # Store normalized emotion key
         self.hovered = False
         self.selected_sound_file = None
         
-        # Initialize pygame mixer for sound playback
         if not pygame.mixer.get_init():
             pygame.mixer.init()
         
-        # Load sound from config if available
         self._load_sound_from_config()
         
         self.setMinimumHeight(38)
@@ -62,7 +81,6 @@ class HoverBox(QWidget):
         
         layout.addStretch(7)
         
-        # Play Sound Button
         self.play_button = QPushButton("Play Sound")
         self.play_button.setStyleSheet("""
             QPushButton {
@@ -96,7 +114,6 @@ class HoverBox(QWidget):
         
         layout.addSpacing(10)
         
-        # Choose Sound Button with Dropdown
         self.sound_button = QPushButton("Choose Sound")
         self.sound_button.setStyleSheet("""
             QPushButton {
@@ -131,30 +148,67 @@ class HoverBox(QWidget):
         layout.addSpacing(25)
     
     def _load_sound_from_config(self):
-        """Load sound file path from setup_config.json"""
+        """Load sound from setup_config.json if available."""
         try:
-            config_path = os.path.join(os.path.dirname(__file__), "setup_config.json")
-            if os.path.exists(config_path):
-                with open(config_path, 'r') as f:
+            if SETUP_CONFIG_PATH.exists():
+                with open(SETUP_CONFIG_PATH, 'r', encoding='utf-8') as f:
                     config = json.load(f)
                     sounds = config.get("sounds", {})
-                    # Match emotion name (case insensitive)
-                    emotion_key = self.text.lower()
-                    if emotion_key in sounds:
-                        sound_path = sounds[emotion_key]
-                        # Convert relative path to absolute
+                    
+                    if self.emotion_key in sounds:
+                        sound_path = sounds[self.emotion_key]
+                        
+                        # convert relative path to absolute if needed
                         if not os.path.isabs(sound_path):
-                            sound_path = os.path.join(os.path.dirname(__file__), sound_path)
+                            # try relative to main_window.py directory
+                            abs_path = os.path.join(os.path.dirname(__file__), sound_path)
+                            if not os.path.exists(abs_path):
+                                # try relative to project root
+                                abs_path = os.path.join(os.getcwd(), sound_path)
+                            sound_path = abs_path
+                        
                         if os.path.exists(sound_path):
                             self.selected_sound_file = sound_path
-                            print(f"✅ Loaded sound for {self.text}: {sound_path}")
+                            filename = os.path.basename(sound_path)
+                            self.sound_button.setToolTip(f"Selected: {filename}")
+                            print(f"✅ Loaded sound for '{self.emotion_key}': {filename}")
                         else:
                             print(f"⚠️ Sound file not found: {sound_path}")
         except Exception as e:
-            print(f"⚠️ Could not load sound from config: {e}")
+            print(f"⚠️ Could not load sound config: {e}")
+    
+    def _save_sound_to_config(self, sound_path: str):
+        """
+        Save sound mapping to both sound_map.json and setup_config.json.
+        Uses utils.json_manager functions - EXACTLY like sound_setup.py!
+        """
+        try:
+            # get just the filename
+            filename = os.path.basename(sound_path)
+            
+            rel_path = "sounds/sound_cache/" + filename
+            
+            print(f"\n=== Saving Sound Mapping ===")
+            print(f"Emotion key: {self.emotion_key}")
+            print(f"Filename: {filename}")
+            print(f"Relative path: {rel_path}")
+            
+            # save to sound_map.json using save_json from utils.json_manager
+            save_json(str(SOUND_MAP_PATH), self.emotion_key, rel_path)
+            print(f"✅ Updated sound_map.json: {self.emotion_key} -> {rel_path}")
+            
+            # update setup_config.json using update_json from utils.json_manager
+            update_json(str(SETUP_CONFIG_PATH), "sounds", {self.emotion_key: rel_path})
+            print(f"✅ Updated setup_config.json: sounds.{self.emotion_key} -> {rel_path}")
+            
+            print(f"✅ Sound successfully mapped: '{filename}' to '{self.emotion_key}'")
+            print("=== Mapping Complete ===\n")
+            
+        except Exception as e:
+            print(f"❌ Could not save sound config: {e}")
+            traceback.print_exc()
     
     def show_sound_menu(self):
-        """Show dropdown menu for sound selection"""
         menu = QMenu(self)
         menu.setStyleSheet("""
             QMenu {
@@ -187,56 +241,13 @@ class HoverBox(QWidget):
         menu.exec_(self.sound_button.mapToGlobal(self.sound_button.rect().bottomLeft()))
     
     def browse_web(self):
-        """Handle Browse Web option"""
-        print(f"Browse Web selected for {self.text}")
+        """Open myinstants.com in browser."""
         self.sound_clicked.emit()
         QDesktopServices.openUrl(QUrl("https://www.myinstants.com"))
     
     def browse_computer(self):
-        """Handle Browse Computer option - open file dialog"""
+        """Browse for sound file and save it to sound_cache - EXACTLY like sound_setup.py"""
         file_dialog = QFileDialog(self)
-        file_dialog.setStyleSheet("""
-            QFileDialog {
-                background-color: #161618;
-                color: #FFFFFF;
-            }
-            QFileDialog QWidget {
-                background-color: #161618;
-                color: #FFFFFF;
-            }
-            QFileDialog QPushButton {
-                background-color: #212124;
-                color: #FFFFFF;
-                border: none;
-                border-radius: 6px;
-                padding: 6px 12px;
-            }
-            QFileDialog QPushButton:hover {
-                background: qlineargradient(
-                    x1:0, y1:0, x2:1, y2:1,
-                    stop:0 rgba(255, 107, 74, 0.3),
-                    stop:0.5 rgba(255, 59, 143, 0.3),
-                    stop:1 rgba(255, 105, 180, 0.3)
-                );
-            }
-            QFileDialog QTreeView, QFileDialog QListView {
-                background-color: #161618;
-                color: #FFFFFF;
-                border: 1px solid #212124;
-            }
-            QFileDialog QLineEdit {
-                background-color: #212124;
-                color: #FFFFFF;
-                border: 1px solid #000000;
-                border-radius: 4px;
-                padding: 4px;
-            }
-            QFileDialog QComboBox {
-                background-color: #212124;
-                color: #FFFFFF;
-            }
-        """)
-        
         file_path, _ = file_dialog.getOpenFileName(
             self,
             "Select Sound File",
@@ -244,26 +255,63 @@ class HoverBox(QWidget):
             "Audio Files (*.mp3 *.wav *.ogg *.m4a);;All Files (*.*)"
         )
         
-        if file_path:
-            self.selected_sound_file = file_path
-            print(f"Selected sound file for {self.text}: {file_path}")
-            filename = os.path.basename(file_path)
-            self.sound_button.setToolTip(f"Selected: {filename}")
+        if not file_path:
+            return
+        
+        try:
+            # Get filename
+            original_filename = os.path.basename(file_path)
+            target_path = SOUND_CACHE_DIR / original_filename
+            
+            print(f"\n=== Sound Selection ===")
+            print(f"Selected file: {file_path}")
+            print(f"Target path: {target_path}")
+            print(f"Emotion: {self.text} (key: {self.emotion_key})")
+            
+            # Copy file to sound_cache if not already there
+            if not target_path.exists() or os.path.abspath(file_path) != os.path.abspath(target_path):
+                import shutil
+                shutil.copy2(file_path, target_path)
+                file_size_kb = target_path.stat().st_size / 1024
+                print(f"✅ Copied sound to cache ({file_size_kb:.1f} KB)")
+            else:
+                print(f"✅ Sound already in cache")
+            
+            # Save the ABSOLUTE path for internal use
+            self.selected_sound_file = str(target_path.resolve())
+            
+            # Update tooltip
+            self.sound_button.setToolTip(f"Selected: {original_filename}")
+            
+            # Save to config files (with RELATIVE path like sound_setup.py)
+            self._save_sound_to_config(str(target_path))
+            
+            print(f"✅ Sound assigned to '{self.text}'")
+            print("=== Selection Complete ===\n")
+            
+        except Exception as e:
+            print(f"❌ Error saving sound: {e}")
+            import traceback
+            traceback.print_exc()
     
     def on_play_button_clicked(self):
-        if self.selected_sound_file:
+        """Play the selected sound using sounds.play_sound.play()"""
+        if self.selected_sound_file and os.path.exists(self.selected_sound_file):
             try:
-                pygame.mixer.music.load(self.selected_sound_file)
-                pygame.mixer.music.play()
-                print(f"Playing sound: {self.selected_sound_file}")
+                print(f"🎵 Playing sound: {os.path.basename(self.selected_sound_file)}")
+                # use sounds.play_sound.play() from sound.play_sound
+                play_sound(self.selected_sound_file, volume=1.0)
             except Exception as e:
-                print(f"Error playing sound: {e}")
+                print(f"❌ Error playing sound: {e}")
+                import traceback
+                traceback.print_exc()
         else:
-            print(f"No sound file selected for {self.text}")
-        self.play_clicked.emit()
+            print(f"⚠️ No sound file selected for {self.text}")
+            if self.selected_sound_file:
+                print(f"   Path: {self.selected_sound_file}")
+                print(f"   Exists: {os.path.exists(self.selected_sound_file)}")
         
-    def on_sound_button_clicked(self):
-        self.sound_clicked.emit()
+        self.play_clicked.emit()
         
     def enterEvent(self, event):
         self.setStyleSheet("""
@@ -327,8 +375,6 @@ class HoverBox(QWidget):
 
 
 class SettingsDialog(QDialog):
-    """Settings dialog for camera configuration"""
-    
     restart_setup_signal = pyqtSignal()
     
     def __init__(self, current_camera_index, parent=None):
@@ -336,8 +382,6 @@ class SettingsDialog(QDialog):
         self.setWindowTitle("Settings")
         self.setModal(True)
         self.setFixedSize(400, 280)
-        
-        # Track if restart setup was requested
         self._restart_setup_requested = False
         
         self.setStyleSheet("""
@@ -438,7 +482,6 @@ class SettingsDialog(QDialog):
         
         layout.addLayout(camera_layout)
         
-        # Volume Slider
         volume_layout = QHBoxLayout()
         volume_label = QLabel("Volume:")
         volume_layout.addWidget(volume_label)
@@ -446,7 +489,7 @@ class SettingsDialog(QDialog):
         self.volume_slider = QSlider(Qt.Horizontal)
         self.volume_slider.setMinimum(0)
         self.volume_slider.setMaximum(100)
-        self.volume_slider.setValue(50)  # Default: 50%
+        self.volume_slider.setValue(50)
         self.volume_slider.setFixedWidth(200)
         self.volume_slider.valueChanged.connect(self.update_volume)
         volume_layout.addWidget(self.volume_slider)
@@ -485,16 +528,11 @@ class SettingsDialog(QDialog):
         return self.camera_spinbox.value()
     
     def update_volume(self, value):
-        """Update volume label and pygame mixer volume"""
         self.volume_value_label.setText(f"{value}%")
-        # Set pygame mixer volume (0.0 to 1.0)
         pygame.mixer.music.set_volume(value / 100.0)
     
     def restart_setup(self):
-        """Mark restart setup as requested and update button appearance"""
         self._restart_setup_requested = True
-        
-        # Change button background to show it's been activated
         self.restart_button.setStyleSheet("""
             QPushButton {
                 background: qlineargradient(
@@ -511,42 +549,26 @@ class SettingsDialog(QDialog):
                 min-width: 80px;
             }
         """)
-        print("Restart Setup marked - will execute after OK is pressed")
     
     def is_restart_setup_requested(self):
-        """Check if restart setup was requested"""
         return self._restart_setup_requested
 
 
 class MainWindow(QMainWindow):
-    """
-    🎭 MOODYSTREAM HAUPTFENSTER 🎭
+    """Main window with full UI controls"""
     
-    ✅ VERBESSERTE VERSION MIT ROBUSTEM SHUTDOWN
-    
-    Features:
-    ✅ Face Detection & Tracking (single/multi-person)
-    ✅ Emotion Recognition mit DeepFace
-    ✅ Gesture Recognition (Thumbs Up, Peace, etc.)
-    ✅ Automatisches Sound-Abspielen
-    ✅ Robustes Stoppen der Detection (WICHTIG!)
-    ✅ Sauberes Cleanup beim Setup-Restart
-    """
-    
-    # Signals
-    frame_ready = pyqtSignal(object)  # Thread-safe Frame-Updates
-    restart_setup_signal = pyqtSignal()  # Setup-Neustart
+    frame_ready = pyqtSignal(object)
+    restart_setup_signal = pyqtSignal()
     
     def __init__(self, camera_index=0):
         super().__init__()
+        
         self.setWindowTitle("Moodystream")
         self.setGeometry(100, 100, 1400, 800)
         
-        # Window lifecycle
         self.setAttribute(Qt.WA_QuitOnClose, True)
         self._is_closing = False
         
-        # Paths
         self.base_dir = os.path.dirname(os.path.abspath(__file__))
         self.logo_path = os.path.join(self.base_dir, "moody_logo.jpg")
         self.ad_mockup_path = os.path.join(self.base_dir, "ad_mockup.jpg")
@@ -560,21 +582,16 @@ class MainWindow(QMainWindow):
         self.stop_event = None
         self.emotion_detection_active = False
         
-        # Initialize pygame mixer
+        # Initialize pygame
         if not pygame.mixer.get_init():
             pygame.mixer.init()
             pygame.mixer.music.set_volume(0.5)
         
-        # Connect signals
         self.frame_ready.connect(self._update_camera_display)
         
         self._setup_ui()
-        
-        print("✅ MainWindow initialized.")
-        print("👉 Click 'Detection: ON' button to start camera.")
     
     def _get_main_stylesheet(self):
-        """Returns the main stylesheet for the window"""
         return """
             QMainWindow {
                 background-color: #161618;
@@ -662,27 +679,19 @@ class MainWindow(QMainWindow):
         """
     
     def _setup_ui(self):
-        """Setup the user interface"""
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QHBoxLayout(central_widget)
         
-        # Left ads
         left_ads = self._create_ad_column()
-        
-        # Center content
         center_layout = self._create_center_layout()
-        
-        # Right ads
         right_ads = self._create_ad_column()
         
-        # Add to main layout
         main_layout.addLayout(left_ads, 1)
         main_layout.addLayout(center_layout, 3)
         main_layout.addLayout(right_ads, 1)
     
     def _create_ad_column(self):
-        """Create an ad column"""
         ads_layout = QVBoxLayout()
         
         for _ in range(2):
@@ -704,15 +713,12 @@ class MainWindow(QMainWindow):
         return ads_layout
     
     def _create_center_layout(self):
-        """Create the center layout with camera and controls"""
         center_layout = QVBoxLayout()
         
-        # Top controls
         top_controls = self._create_top_controls()
         center_layout.addLayout(top_controls)
-        center_layout.addSpacing(5) 
+        center_layout.addSpacing(5)
         
-        # Camera display
         self.camera_label = QLabel()
         self.camera_label.setStyleSheet(
             "background-color: #000000; border: 1px solid #212124; border-radius: 8px;"
@@ -723,12 +729,10 @@ class MainWindow(QMainWindow):
         center_layout.addWidget(self.camera_label, 0, Qt.AlignHCenter)
         center_layout.addSpacing(10)
         
-        # Emotions section
         emotions_section = self._create_emotions_section()
         center_layout.addLayout(emotions_section)
         center_layout.addSpacing(8)
         
-        # Gestures section
         gestures_section = self._create_gestures_section()
         center_layout.addLayout(gestures_section)
         center_layout.addStretch()
@@ -736,10 +740,8 @@ class MainWindow(QMainWindow):
         return center_layout
     
     def _create_top_controls(self):
-        """Create top control bar"""
         top_controls = QHBoxLayout()
         
-        # Logo
         self.logo_label = QLabel()
         if os.path.exists(self.logo_path):
             logo_pixmap = QPixmap(self.logo_path)
@@ -753,14 +755,12 @@ class MainWindow(QMainWindow):
         
         top_controls.addSpacing(15)
         
-        # Title
         title_label = QLabel("MOODYSTREAM")
         title_label.setStyleSheet("font-size: 18px; font-weight: bold; letter-spacing: 1px;")
         top_controls.addWidget(title_label)
         
         top_controls.addStretch()
         
-        # Settings button
         self.settings_button = QPushButton("⚙ Settings")
         self.settings_button.setFixedSize(120, 32)
         self.settings_button.clicked.connect(self.open_settings)
@@ -768,7 +768,6 @@ class MainWindow(QMainWindow):
         
         top_controls.addSpacing(10)
         
-        # Detection toggle button
         self.emotion_detection_button = QPushButton("Detection: OFF")
         self.emotion_detection_button.setFixedSize(140, 32)
         self.emotion_detection_button.setCheckable(True)
@@ -779,22 +778,21 @@ class MainWindow(QMainWindow):
         return top_controls
     
     def _create_emotions_section(self):
-        """Create emotions section"""
+        """Create emotions section with sliders and info icons"""
         emotions_layout = QVBoxLayout()
-        
-        # Header
+    
+        # header
         emotions_header = QHBoxLayout()
         emotions_label = QLabel("EMOTIONS")
         emotions_label.setStyleSheet("font-size: 14px; font-weight: bold;")
         emotions_header.addWidget(emotions_label)
         emotions_header.addStretch()
         emotions_header.addSpacing(50)
-        
-        # Trigger Time Slider
+    
         emotion_trigger_time_label = QLabel("Trigger Time")
         emotion_trigger_time_label.setStyleSheet("font-size: 11px;")
         emotions_header.addWidget(emotion_trigger_time_label)
-        
+    
         trigger_time_info = QLabel("ℹ")
         trigger_time_info.setStyleSheet("""
             QLabel {
@@ -810,23 +808,22 @@ class MainWindow(QMainWindow):
         trigger_time_info.setToolTip("How long should the bot wait to play a sound")
         trigger_time_info.setCursor(Qt.WhatsThisCursor)
         emotions_header.addWidget(trigger_time_info)
-        
+    
         emotions_header.addSpacing(5)
-        
+    
         self.emotion_trigger_slider = QSlider(Qt.Horizontal)
         self.emotion_trigger_slider.setMinimum(0)
         self.emotion_trigger_slider.setMaximum(100)
         self.emotion_trigger_slider.setValue(50)
         self.emotion_trigger_slider.setFixedWidth(120)
         emotions_header.addWidget(self.emotion_trigger_slider)
-        
+    
         emotions_header.addSpacing(20)
-        
-        # Sensitivity Slider
+    
         sensitivity_label = QLabel("Sensitivity")
         sensitivity_label.setStyleSheet("font-size: 11px;")
         emotions_header.addWidget(sensitivity_label)
-        
+    
         sensitivity_info = QLabel("ℹ")
         sensitivity_info.setStyleSheet("""
             QLabel {
@@ -842,47 +839,52 @@ class MainWindow(QMainWindow):
         sensitivity_info.setToolTip("How confident should the bot be to play a sound")
         sensitivity_info.setCursor(Qt.WhatsThisCursor)
         emotions_header.addWidget(sensitivity_info)
-        
+    
         emotions_header.addSpacing(5)
-        
+    
         self.emotion_sensitivity_slider = QSlider(Qt.Horizontal)
         self.emotion_sensitivity_slider.setMinimum(0)
         self.emotion_sensitivity_slider.setMaximum(100)
         self.emotion_sensitivity_slider.setValue(50)
         self.emotion_sensitivity_slider.setFixedWidth(120)
         emotions_header.addWidget(self.emotion_sensitivity_slider)
-        
+    
         emotions_layout.addLayout(emotions_header)
         emotions_layout.addSpacing(5)
-        
-        # Emotion boxes
+    
+        # emotion boxes (hoverbox)
         emotion_names = ["Happy", "Surprise", "Sad", "Fear"]
+        self.emotion_boxes = {}
+    
         for i, name in enumerate(emotion_names):
             box = HoverBox(name)
             box.setMinimumWidth(775)
             emotions_layout.addWidget(box)
+        
+            # store with lowercase key for easy lookup
+            self.emotion_boxes[name.lower()] = box
+            
             if i < len(emotion_names) - 1: 
                 emotions_layout.addSpacing(4)
-        
-        return emotions_layout
     
+        return emotions_layout
+
     def _create_gestures_section(self):
-        """Create gestures section"""
+        """Create gestures section with slider and info icon"""
         gestures_layout = QVBoxLayout()
-        
-        # Header
+    
+        # header
         gestures_header = QHBoxLayout()
         gestures_label = QLabel("GESTURES")
         gestures_label.setStyleSheet("font-size: 14px; font-weight: bold;")
         gestures_header.addWidget(gestures_label)
         gestures_header.addStretch()
         gestures_header.addSpacing(50)
-        
-        # Sensitivity Slider
+    
         gesture_sensitivity_label = QLabel("Sensitivity")
         gesture_sensitivity_label.setStyleSheet("font-size: 11px;")
         gestures_header.addWidget(gesture_sensitivity_label)
-        
+    
         gesture_sensitivity_info = QLabel("ℹ")
         gesture_sensitivity_info.setStyleSheet("""
             QLabel {
@@ -898,304 +900,194 @@ class MainWindow(QMainWindow):
         gesture_sensitivity_info.setToolTip("How confident should the bot be to play a sound")
         gesture_sensitivity_info.setCursor(Qt.WhatsThisCursor)
         gestures_header.addWidget(gesture_sensitivity_info)
-        
+    
         gestures_header.addSpacing(5)
-        
+    
         self.gesture_sensitivity_slider = QSlider(Qt.Horizontal)
         self.gesture_sensitivity_slider.setMinimum(0)
         self.gesture_sensitivity_slider.setMaximum(100)
         self.gesture_sensitivity_slider.setValue(50)
         self.gesture_sensitivity_slider.setFixedWidth(120)
         gestures_header.addWidget(self.gesture_sensitivity_slider)
-        
+    
         gestures_layout.addLayout(gestures_header)
         gestures_layout.addSpacing(5)
-        
-        # Gesture boxes
+    
+        # gesture boxes 
         gesture_names = ["Thumbs up", "Thumbs down", "Peace"]
+        self.gesture_boxes = {} 
+    
         for i, name in enumerate(gesture_names):
             box = HoverBox(name)
             box.setMinimumWidth(775)
             gestures_layout.addWidget(box)
+        
+            # store with normalized key to match what camera_stream is expecting
+            normalized_key = normalize_gesture_name(name)
+            self.gesture_boxes[normalized_key] = box
+        
             if i < len(gesture_names) - 1:  
                 gestures_layout.addSpacing(4)
-        
+    
         return gestures_layout
     
-    # ========================================================================
-    # 🎥 DETECTION LOGIC - MIT ROBUSTEM SHUTDOWN
-    # ========================================================================
-    
+    # camera detection
     def start_detection_thread(self):
-        """
-        ✅ VERBESSERTE VERSION: Robustes Starten
-        
-        Startet die Detection-Pipeline mit besserem Error-Handling.
-        """
         if self.detection_running:
-            print("⚠️ Detection already running")
             return
         
         if not DETECTION_AVAILABLE:
             print("❌ camera_stream.py not available!")
             return
         
-        # Setze Flags
         self.detection_running = True
         self.stop_event = threading.Event()
         
         def detection_worker():
-            """Worker-Thread für camera_stream.py"""
             try:
-                print("\n" + "="*60)
-                print("🎥 Starting MOODYSTREAM Detection Pipeline")
-                print("="*60)
-                print(f"📹 Camera Index: {self.camera_index}")
-                print("="*60 + "\n")
-                
-                # Callback: Frame zur GUI senden
                 def frame_callback(frame):
-                    """Thread-safe Frame-Übertragung zur GUI"""
                     if self.detection_running:
-                        self._queue_frame_display(frame)
+                        try:
+                            self._queue_frame_display(frame)
+                        except Exception:
+                            pass
                 
-                # 🚀 STARTE DETECTION-PIPELINE
                 start_detection(
                     camera_index=self.camera_index,
                     show_window=False,
                     virtual_cam=False,
                     frame_callback=frame_callback,
                     stop_event=self.stop_event,
+                    show_fps_plot=False,
                 )
                 
-                print("\n✅ camera_stream finished cleanly")
-                
             except Exception as e:
-                print(f"\n❌ Detection thread error: {e}")
-                import traceback
-                traceback.print_exc()
+                print(f"❌ Detection error: {e}")
             finally:
-                # WICHTIG: Setze Flag auf False (auch bei Exception!)
                 self.detection_running = False
-                print("🔒 Detection thread finalized")
         
-        # Thread starten
         self.detection_thread = threading.Thread(target=detection_worker, daemon=True)
         self.detection_thread.start()
-        
-        print("✅ Detection thread started!\n")
     
     def _queue_frame_display(self, frame):
-        """Thread-safe Frame-Konvertierung: OpenCV → Qt"""
         try:
-            # BGR → RGB
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             h, w, ch = frame_rgb.shape
-            
-            # NumPy → QImage → QPixmap
             bytes_per_line = ch * w
-            qt_image = QImage(
-                frame_rgb.data, 
-                w, 
-                h, 
-                bytes_per_line, 
-                QImage.Format_RGB888
-            )
-            qt_image = qt_image.copy()  # WICHTIG: Kopie erstellen!
+            qt_image = QImage(frame_rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
+            qt_image = qt_image.copy()
             pixmap = QPixmap.fromImage(qt_image)
-            
-            # Signal emittieren (thread-safe!)
             self.frame_ready.emit(pixmap)
-                
-        except Exception as e:
-            # Stilles Ignorieren (Frame-Errors sind nicht kritisch)
+        except Exception:
             pass
     
     @pyqtSlot(object)
     def _update_camera_display(self, pixmap):
-        """GUI-Thread: Aktualisiert Kamera-Display"""
         try:
-            # Skaliere und setze Pixmap
             scaled_pixmap = pixmap.scaled(
                 self.camera_label.size(),
                 Qt.KeepAspectRatio,
                 Qt.SmoothTransformation
             )
             self.camera_label.setPixmap(scaled_pixmap)
-                
-        except Exception as e:
-            # Stilles Ignorieren
+        except Exception:
             pass
     
     def stop_detection_internal(self):
-        """
-        ✅ VERBESSERTE VERSION: Robustes Stoppen
-        
-        Stoppt die Detection-Pipeline zuverlässig mit mehreren Retry-Versuchen.
-        """
         if not self.detection_running:
-            print("ℹ️  Detection already stopped")
             return
         
-        print("\n" + "="*60)
-        print("🛑 Stopping detection pipeline...")
-        print("="*60)
-        
-        # 1. Setze stop_event (camera_stream.py wird das beachten)
         if self.stop_event:
             self.stop_event.set()
-            print("✅ Stop event set")
         
-        # 2. Setze Flag (stoppt frame_callback)
         self.detection_running = False
-        print("✅ Detection flag cleared")
         
-        # 3. Warte auf Thread mit mehreren Versuchen
         if self.detection_thread and self.detection_thread.is_alive():
-            print("⏳ Waiting for detection thread...")
-            
-            # Mehrere Versuche mit zunehmender Wartezeit
-            for attempt in range(3):
-                timeout = 1.0 + attempt  # 1s, 2s, 3s
+            for attempt in range(5):
+                timeout = 1.0 + attempt
                 self.detection_thread.join(timeout=timeout)
                 
                 if not self.detection_thread.is_alive():
-                    print(f"✅ Thread stopped after {timeout}s")
                     break
-                else:
-                    print(f"⏳ Attempt {attempt + 1}/3: Thread still running...")
-            
-            # Falls Thread immer noch läuft (sollte nicht passieren)
-            if self.detection_thread.is_alive():
-                print("⚠️  Thread did not stop cleanly (daemon will be cleaned up)")
-        else:
-            print("✅ No thread to stop")
         
-        # 4. Reset Kamera-Display
         self.camera_label.clear()
         self.camera_label.setText("Click 'Detection: ON' to start camera")
-        
-        # 5. Cleanup
         self.detection_thread = None
         self.stop_event = None
-        
-        print("="*60)
-        print("✅ Detection stopped successfully")
-        print("="*60 + "\n")
     
     def toggle_emotion_detection(self):
-        """Toggle emotion detection on/off via Button"""
         self.emotion_detection_active = self.emotion_detection_button.isChecked()
         
         if self.emotion_detection_active:
-            # Start Detection
             self.emotion_detection_button.setText("Detection: ON")
-            print("\n🎬 Starting detection...")
             
             if DETECTION_AVAILABLE and not self.detection_running:
                 try:
                     self.start_detection_thread()
                 except Exception as e:
-                    print(f"❌ Could not start detection: {e}")
-                    import traceback
-                    traceback.print_exc()
-                    
-                    # Revert button state
+                    print(f"❌ Failed to start detection: {e}")
                     self.emotion_detection_button.setChecked(False)
                     self.emotion_detection_active = False
                     self.emotion_detection_button.setText("Detection: OFF")
         else:
-            # Stop Detection
             self.emotion_detection_button.setText("Detection: OFF")
-            print("\n⏸ Stopping detection...")
             self.stop_detection_internal()
     
-    # ========================================================================
-    # ⚙️ SETTINGS & DIALOGS
-    # ========================================================================
-    
     def open_settings(self):
-        """Open settings dialog"""
         dialog = SettingsDialog(self.camera_index, self)
         
         if dialog.exec_() == QDialog.Accepted:
             new_camera_index = dialog.get_camera_index()
+            
+            # camera index debug
             if new_camera_index != self.camera_index:
-                print(f"📹 Camera index changed to {new_camera_index}")
-                self.camera_index = new_camera_index
+                print(f"📷 Camera index changed: {self.camera_index} → {new_camera_index}")
                 
-                # Restart detection if running
-                if self.detection_running:
+                was_running = self.detection_running
+                if was_running:
                     print("🔄 Restarting detection with new camera...")
                     self.stop_detection_internal()
-                    time.sleep(0.5)  # Wait for camera release
-                    self.emotion_detection_button.setChecked(True)
-                    self.start_detection_thread()
+                    time.sleep(1.0)
+                
+                self.camera_index = new_camera_index
+                print(f"✅ Camera index updated to {new_camera_index}")
+                
+                if was_running:
+                    QApplication.processEvents()
+                    time.sleep(0.5)
+                    
+                    try:
+                        self.start_detection_thread()
+                        print("✅ Detection restarted with new camera")
+                    except Exception as e:
+                        print(f"❌ Failed to restart: {e}")
+                        self.emotion_detection_button.setChecked(False)
+                        self.emotion_detection_active = False
+                        self.emotion_detection_button.setText("Detection: OFF")
             
-            # Check if restart setup was requested
+            # setup restart
             if dialog.is_restart_setup_requested():
-                print("🔄 Restart Setup requested...")
-                
-                # WICHTIG: Stoppe Detection VOR Setup-Restart
                 if self.detection_running:
-                    print("🛑 Stopping detection before setup restart...")
                     self.stop_detection_internal()
-                    time.sleep(0.5)  # Warte bis Kamera freigegeben ist
+                    time.sleep(1.0)
                 
-                # Emittiere Signal (main.py wird MainWindow schließen)
                 self.restart_setup_signal.emit()
     
-    # ========================================================================
-    # 🔚 CLEANUP & CLOSE
-    # ========================================================================
-    
     def closeEvent(self, event):
-        """
-        ✅ VERBESSERTE VERSION: Robustes Cleanup
-        
-        Stoppt Detection sauber und gibt Kamera frei.
-        """
-        # Prevent double execution
         if self._is_closing:
             event.accept()
             return
         
-        print("\n" + "="*60)
-        print("🛑 Closing MainWindow...")
-        print("="*60)
-        
         self._is_closing = True
         
-        # Stop detection (WICHTIG!)
         if self.detection_running:
-            print("🛑 Stopping detection during window close...")
             self.stop_detection_internal()
-            
-            # Extra Wartezeit für Kamera-Release
-            print("⏳ Giving camera time to release...")
             time.sleep(0.5)
         
         event.accept()
-        
-        print("✅ MainWindow closed cleanly")
-        print("="*60 + "\n")
-        
-        # Quit application
         QApplication.instance().quit()
 
-
-# ============================================================================
-# 🚀 MAIN ENTRY POINT
-# ============================================================================
-
 if __name__ == "__main__":
-    print("\n" + "="*60)
-    print("🎭 MOODYSTREAM - Emotion & Gesture Detection")
-    print("="*60)
-    print("⚠️  Note: This is the standalone test mode.")
-    print("    For full functionality, run via main.py")
-    print("="*60 + "\n")
-    
     app = QApplication(sys.argv)
     window = MainWindow()
     window.show()

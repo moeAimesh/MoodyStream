@@ -1,0 +1,10 @@
+{
+  "sounds": {
+    "happy": "sounds/sound_cache/fahhhhhhhhhhhhhh.mp3",
+    "fear": "sounds/sound_cache/myinstants-1.mp3",
+    "thumbs down": "sounds/sound_cache/fahhhhhhhhhhhhhh.mp3",
+    "peace": "sounds/sound_cache/fahhhhhhhhhhhhhh.mp3",
+    "sad": "sounds/sound_cache/myinstants-1.mp3",
+    "surprise": "sounds/sound_cache/myinstants.mp3"
+  }
+}

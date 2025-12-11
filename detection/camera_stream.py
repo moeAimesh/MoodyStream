@@ -99,7 +99,7 @@ def start_detection(
     
 
     er = EmotionRecognition(threshold=10)
-    print("ðŸŽ¥ Kamera gestartet â€“ Gesten- und Emotionserkennung aktiv!")
+    print("Kamera gestartet Gesten- und Emotionserkennung aktiv!")
 
     emotion_jobs: "queue.Queue[tuple]" = queue.Queue(maxsize=8)
     emotion_results: "queue.Queue[tuple]" = queue.Queue()
@@ -265,7 +265,7 @@ def start_detection(
             except queue.Empty:
                 pass
 
-            #Emotion-Sounds Ã¼ber Mapper (pro Track, bei Ã„nderung & != neutral)
+            #Emotion-Sounds Ã¼ber Mapper (pro Track, bei Änderung & != neutral)
             for track in tracks.values():
                 current_emotion = track.emotion or default_emotion
                 last = last_emotions[track.track_id]
@@ -357,7 +357,7 @@ def start_detection(
         cv2.destroyAllWindows()
         print("ðŸ›‘ Erkennung gestoppt.")
         
-        # plot only when necessary otherwise gui will crash
+        # plot only when necessary otherwise gui will crash!!!!!!
         if show_fps_plot:
             visualise_avg_fps()
 

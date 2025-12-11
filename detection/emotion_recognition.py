@@ -27,9 +27,9 @@ from utils.settings import (
     HEURISTIC_DEBUG_INTERVAL,
 )
 
-CLASSIFIER_CONFIDENCE = 0.5
+CLASSIFIER_CONFIDENCE = 0.35
 DEFAULT_GATE = 0.40
-DEFAULT_MARGIN = 0.02
+DEFAULT_MARGIN = 0.01
 STATE_TTL_SECONDS = 600  # purge per-track state after N seconds of inactivity
 STATE_PURGE_INTERVAL = 60  # throttle how often we scan for stale tracks
 

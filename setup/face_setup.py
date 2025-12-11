@@ -79,6 +79,7 @@ class RestFaceCalibrator:
         self.computed_thresholds = {"gate": 0.60, "margin": 0.08}
         self.neutral_feature_mean = None
         self.heuristic_thresholds: Optional[HeuristicThresholds] = None
+        self._current_camera_index = 0  # NEW: Track current camera index
 
     def record_emotions(
         self,
@@ -108,7 +109,8 @@ class RestFaceCalibrator:
         selection_mode = emotions is None
         use_selector = selector_emotions is not None or selection_mode
 
-        cam = cv2.VideoCapture(0)
+        # CHANGED: Use self._current_camera_index instead of hardcoded 0
+        cam = cv2.VideoCapture(self._current_camera_index)
         cam.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         cam.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
@@ -139,6 +141,7 @@ class RestFaceCalibrator:
         start_checker: Optional[Callable[[], bool]] = None
         frame_callback: Optional[Callable[[np.ndarray], None]] = None
         done_checker: Optional[Callable[[], bool]] = None
+        camera_index_checker: Optional[Callable[[], int]] = None  # NEW
 
         if use_selector and selector_list:
             qt_app, selector_ui = self._init_emotion_selector(
@@ -151,11 +154,26 @@ class RestFaceCalibrator:
                 start_checker = selector_ui.consume_start_request
                 frame_callback = selector_ui.update_frame
                 done_checker = selector_ui.consume_done_request
+                camera_index_checker = selector_ui.get_camera_index  # NEW
             else:
                 selector_ui = None
 
         try:
             while pending_map or (selector_ui is not None and qt_app is not None):
+                # NEW: Check for camera switch between emotions
+                if camera_index_checker:
+                    new_index = camera_index_checker()
+                    if new_index != self._current_camera_index:
+                        print(f"🎥 Switching camera from {self._current_camera_index} to {new_index}...")
+                        cam.release()
+                        self._current_camera_index = new_index
+                        cam = cv2.VideoCapture(self._current_camera_index)
+                        cam.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                        cam.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                        # Short warm-up for new camera
+                        self._warmup_session(cam, seconds=1.0, show_preview=False)
+                        print("✅ Camera switched successfully.")
+
                 if selector_ui is not None and qt_app is not None:
                     # allow finishing if all pending emotions are done and user clicks Done
                     if not pending_map and done_checker and done_checker():
@@ -193,7 +211,23 @@ class RestFaceCalibrator:
                         selection_source=selection_getter,
                         start_checker=start_checker,
                         frame_callback=frame_callback,
+                        camera_index_checker=camera_index_checker,  # NEW
                     )
+                    
+                    # NEW: Handle camera change during _wait_for_start
+                    if override == "__camera_change__":
+                        new_index = camera_index_checker() if camera_index_checker else self._current_camera_index
+                        if new_index != self._current_camera_index:
+                            print(f"🎥 Switching camera from {self._current_camera_index} to {new_index}...")
+                            cam.release()
+                            self._current_camera_index = new_index
+                            cam = cv2.VideoCapture(self._current_camera_index)
+                            cam.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                            cam.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                            self._warmup_session(cam, seconds=1.0, show_preview=False)
+                            print("✅ Camera switched successfully.")
+                        continue  # Restart wait_for_start with new camera
+                    
                     if override:
                         if override not in pending_map and override not in pending_order and override not in [e for e, _ in targets]:
                             print(f"⚠️ Selection '{override}' unknown – ignoring.")
@@ -283,6 +317,7 @@ class RestFaceCalibrator:
         selection_source: Optional[Callable[[], Optional[str]]] = None,
         start_checker: Optional[Callable[[], bool]] = None,
         frame_callback: Optional[Callable[[np.ndarray], None]] = None,
+        camera_index_checker: Optional[Callable[[], int]] = None,  # NEW
     ):
         proceed, override = self._wait_for_start(
             cam,
@@ -293,6 +328,7 @@ class RestFaceCalibrator:
             selection_source=selection_source,
             start_checker=start_checker,
             frame_callback=frame_callback,
+            camera_index_checker=camera_index_checker,  # NEW
         )
         if override:
             return None, override
@@ -516,6 +552,7 @@ class RestFaceCalibrator:
         # Dynamic thresholds from neutral noise
         self._compute_thresholds_from_neutral()
         return True
+    
     def save_model(self):
         """
         Speichert pro Emotion Mittelwerte, Distanzen und Beispielbilder.
@@ -707,11 +744,23 @@ class RestFaceCalibrator:
         selection_source: Optional[Callable[[], Optional[str]]] = None,
         start_checker: Optional[Callable[[], bool]] = None,
         frame_callback: Optional[Callable[[np.ndarray], None]] = None,
+        camera_index_checker: Optional[Callable[[], int]] = None,  # NEW
     ) -> tuple[bool, Optional[str]]:
         """Show live preview and wait for ENTER/SPACE to start, ESC/Q to abort."""
         print(f"\nEmotion '{emotion}': {instruction}")
         print("Press ENTER/SPACE to start, ESC or Q to cancel.")
+        
+        last_checked_index = self._current_camera_index
+        
         while True:
+            # NEW: Check for camera switch during preview
+            if camera_index_checker:
+                new_index = camera_index_checker()
+                if new_index != last_checked_index:
+                    print(f"🎥 Camera changed to {new_index}, restarting preview...")
+                    # Signal to record_emotions that camera needs to be switched
+                    return False, "__camera_change__"
+            
             ret, frame = cam.read()
             if not ret:
                 continue
