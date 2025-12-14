@@ -37,14 +37,15 @@ from utils.settings import FACE_SETUP_ENABLED, REST_FACE_MODEL_PATH
 class SetupController(QObject):
     finished = pyqtSignal(bool)   # True = success, False = cancelled
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, restart_mode: str = "whole"):
         super().__init__(parent)
+        self.restart_mode = restart_mode
 
     def start(self):
         """Starts the entire setup wizard as a GUI-driven process."""
 
         # Run the actual setup tasks
-        if not run_rest_face_setup(user="default"):
+        if not run_rest_face_setup(user="default", restart_mode=self.restart_mode):
             self.finished.emit(False)
             return
 
@@ -66,7 +67,7 @@ def _should_capture_faces() -> bool:
     return FACE_SETUP_ENABLED
 
 
-def run_rest_face_setup(user="default", force_record=None):
+def run_rest_face_setup(user="default", force_record=None, restart_mode: str = "whole"):
     """Führt die neue Rest-Face-Kalibrierung aus."""
     print("📷 Starte Rest-Face-Kalibrierung ...")
     model_path = REST_FACE_MODEL_PATH
@@ -76,19 +77,45 @@ def run_rest_face_setup(user="default", force_record=None):
     else:
         force_record_local = force_record
 
-    if not force_record_local:
+    if restart_mode == "specific":
+        # Try to keep existing data; fall back to full setup if none exists.
         if not calibrator.load_snapshot():
-            print("⚠️ Kein Snapshot vorhanden – starte neue Aufnahme.")
+            print("Kein Snapshot vorhanden -> starte komplette Aufnahme.")
+            restart_mode = "whole"
+            force_record_local = True
+        else:
+            force_record_local = False
+
+    if not force_record_local and restart_mode != "specific":
+        if not calibrator.load_snapshot():
+            print("Kein Snapshot vorhanden -> starte neue Aufnahme.")
             force_record_local = True
 
     if force_record_local:
         success = calibrator.record_emotions(duration=12, analyze_every=5)
         if not success:
-            print("✖️ Keine Daten erfasst – bitte erneut versuchen.")
+            print("Keine Daten erfasst -> bitte erneut versuchen.")
+            return False
+    elif restart_mode == "specific":
+        # Allow selective re-recording while keeping existing data.
+        from setup.face_setup import EMOTION_PROFILES  # local import to avoid cycles
+        emotions_all = [emo for emo, _ in EMOTION_PROFILES]
+        completed = [emo for emo in emotions_all if emo in calibrator.profiles]
+        success = calibrator.record_emotions(
+            emotions=emotions_all,
+            duration=12,
+            analyze_every=5,
+            selector_emotions=emotions_all,
+            enabled_emotions=emotions_all,
+            completed_emotions=completed,
+        )
+        if not success:
+            print("Wiederholung abgebrochen.")
             return False
     elif not calibrator.profiles:
-        print("✖️ Keine gespeicherten Profile gefunden.")
+        print("Keine gespeicherten Profile gefunden.")
         return False
+
 
     def _run_outlier_filter():
         try:
@@ -96,7 +123,7 @@ def run_rest_face_setup(user="default", force_record=None):
 
             summary = filter_outliers(
                 calibrator,
-                method="lof",
+                method="radius",
                 contamination=0.05,
                 radius_sigma=2.5,
             )
@@ -126,9 +153,9 @@ def run_rest_face_setup(user="default", force_record=None):
         if not retry_emotions:
             break
 
-        print("⚠️ Folgende Emotionen werden neu aufgenommen (zu viele Ausreißer):", ", ".join(retry_emotions))
+        retry_list = ", ".join(retry_emotions)
         _show_repeat_popup(
-            "Unfortunately, the setup process needs to be repeated because the emotions weren't exaggerated enough. Please try again!"
+            f"Too many outliers detected for: {retry_list}.\nPlease exaggerate these emotions and record them again."
         )
         success = calibrator.record_emotions(
             emotions=retry_emotions,

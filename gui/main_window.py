@@ -6,18 +6,24 @@ import pygame
 import threading
 import json
 import time
+from typing import List
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QLabel, QSlider,
-                             QDialog, QSpinBox, QMenu, QFileDialog)
+                             QDialog, QMenu, QFileDialog, QComboBox,
+                             QMessageBox)
 from PyQt5.QtCore import Qt, pyqtSignal, pyqtSlot, QUrl
 from PyQt5.QtGui import QPixmap, QImage, QDesktopServices
 from pathlib import Path
-from sounds.play_sound import play as play_sound 
-from utils.json_manager import save_json, update_json
+from sounds.play_sound import play as play_sound, set_default_volume 
+from utils.json_manager import load_json, save_json, update_json
+from utils.settings import (
+    SETUP_CONFIG_PATH,
+    SOUND_CACHE_DIR,
+    SOUND_MAP_PATH,
+    TRIGGER_TIME_EMOTION_SEC,
+    TRIGGER_TIME_GESTURE_SEC,
+)
 
-SOUND_CACHE_DIR = Path("sounds/sound_cache")
-SETUP_CONFIG_PATH = Path("setup_config.json")
-SOUND_MAP_PATH = Path("sounds/sound_map.json")
 SOUND_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 # import camera_stream
@@ -41,6 +47,10 @@ def normalize_gesture_name(gesture_name: str) -> str:
     """
     return gesture_name.lower().replace(" ", "")
 
+
+EMOTION_TRIGGER_OPTIONS = [0.0, 0.25, 0.5, 0.75, 1.0]
+GESTURE_TRIGGER_OPTIONS = [0.0, 1.0, 2.0, 3.0]
+
 class HoverBox(QWidget):
     """Custom widget that changes color on hover"""
     clicked = pyqtSignal()
@@ -56,8 +66,6 @@ class HoverBox(QWidget):
         
         if not pygame.mixer.get_init():
             pygame.mixer.init()
-        
-        self._load_sound_from_config()
         
         self.setMinimumHeight(38)
         self.setMaximumHeight(38)  
@@ -146,6 +154,9 @@ class HoverBox(QWidget):
         layout.addWidget(self.sound_button)
         
         layout.addSpacing(25)
+
+        # Load config after UI elements exist (tooltip needs sound_button)
+        self._load_sound_from_config()
     
     def _load_sound_from_config(self):
         """Load sound from setup_config.json if available."""
@@ -375,14 +386,16 @@ class HoverBox(QWidget):
 
 
 class SettingsDialog(QDialog):
-    restart_setup_signal = pyqtSignal()
+    restart_setup_signal = pyqtSignal(str)
     
-    def __init__(self, current_camera_index, parent=None):
+    def __init__(self, current_camera_index, cameras: List[int] | None = None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Settings")
         self.setModal(True)
         self.setFixedSize(400, 280)
         self._restart_setup_requested = False
+        self._restart_mode = None
+        self._available_cameras = list(dict.fromkeys(cameras)) if cameras else []
         
         self.setStyleSheet("""
             QDialog {
@@ -418,7 +431,7 @@ class SettingsDialog(QDialog):
                     stop:1 rgba(255, 105, 180, 0.5)
                 );
             }
-            QSpinBox {
+            QComboBox {
                 background-color: #212124;
                 color: #FFFFFF;
                 border: none;
@@ -426,25 +439,22 @@ class SettingsDialog(QDialog):
                 padding: 6px 12px;
                 font-size: 13px;
             }
-            QSpinBox:hover {
+            QComboBox:hover {
                 background-color: #2a2a2d;
             }
-            QSpinBox::up-button, QSpinBox::down-button {
-                background-color: transparent;
+            QComboBox::drop-down {
+                background: transparent;
+                width: 0px;
                 border: none;
-                width: 16px;
             }
-            QSpinBox::up-arrow {
-                image: none;
-                border-left: 4px solid transparent;
-                border-right: 4px solid transparent;
-                border-bottom: 5px solid #FFFFFF;
-            }
-            QSpinBox::down-arrow {
-                image: none;
-                border-left: 4px solid transparent;
-                border-right: 4px solid transparent;
-                border-top: 5px solid #FFFFFF;
+            QComboBox QAbstractItemView {
+                background-color: #212124;
+                color: #FFFFFF;
+                selection-background-color: rgba(255, 107, 74, 0.3);
+                border: 1px solid #000000;
+                border-radius: 6px;
+                padding: 4px;
+                outline: none;
             }
             QSlider::groove:horizontal {
                 background-color: #2a2a2d;
@@ -469,15 +479,13 @@ class SettingsDialog(QDialog):
         layout.setContentsMargins(20, 20, 20, 20)
         
         camera_layout = QHBoxLayout()
-        camera_label = QLabel("Camera Index:")
+        camera_label = QLabel("Camera:")
         camera_layout.addWidget(camera_label)
         
-        self.camera_spinbox = QSpinBox()
-        self.camera_spinbox.setMinimum(0)
-        self.camera_spinbox.setMaximum(10)
-        self.camera_spinbox.setValue(current_camera_index)
-        self.camera_spinbox.setFixedWidth(100)
-        camera_layout.addWidget(self.camera_spinbox)
+        self.camera_combo = QComboBox()
+        self.camera_combo.setFixedWidth(180)
+        self._populate_cameras(current_camera_index)
+        camera_layout.addWidget(self.camera_combo)
         camera_layout.addStretch()
         
         layout.addLayout(camera_layout)
@@ -502,6 +510,7 @@ class SettingsDialog(QDialog):
         volume_layout.addStretch()
         
         layout.addLayout(volume_layout)
+        self._load_volume_setting()
         
         restart_layout = QHBoxLayout()
         self.restart_button = QPushButton("Restart Setup")
@@ -524,15 +533,72 @@ class SettingsDialog(QDialog):
         
         layout.addLayout(button_layout)
     
+    def _populate_cameras(self, current_index: int, max_index: int = 4):
+        """Populate camera list; prefer provided list, fallback to scan."""
+        found_indices = list(self._available_cameras)
+        if not found_indices:
+            for idx in range(max_index + 1):
+                cap = cv2.VideoCapture(idx)
+                if cap.isOpened():
+                    found_indices.append(idx)
+                cap.release()
+        if current_index not in found_indices:
+            found_indices.insert(0, current_index)
+        self.camera_combo.clear()
+        for idx in found_indices:
+            self.camera_combo.addItem(f"Camera {idx}", idx)
+        # select current
+        current_pos = self.camera_combo.findData(current_index)
+        if current_pos == -1:
+            current_pos = 0
+        self.camera_combo.setCurrentIndex(current_pos)
+
     def get_camera_index(self):
-        return self.camera_spinbox.value()
+        return self.camera_combo.currentData()
+    
+    def _load_volume_setting(self):
+        cfg = load_json(SETUP_CONFIG_PATH)
+        vol = cfg.get("volume") if isinstance(cfg, dict) else None
+        try:
+            vol_float = float(vol)
+        except (TypeError, ValueError):
+            vol_float = 0.5
+        vol_float = max(0.0, min(1.0, vol_float))
+        vol_percent = int(round(vol_float * 100))
+        self.volume_slider.blockSignals(True)
+        self.volume_slider.setValue(vol_percent)
+        self.volume_slider.blockSignals(False)
+        self.update_volume(vol_percent)
     
     def update_volume(self, value):
         self.volume_value_label.setText(f"{value}%")
-        pygame.mixer.music.set_volume(value / 100.0)
+        vol = value / 100.0
+        pygame.mixer.music.set_volume(vol)
+        set_default_volume(vol)
+        update_json(str(SETUP_CONFIG_PATH), "volume", vol)
     
     def restart_setup(self):
-        self._restart_setup_requested = True
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Restart Setup")
+        msg.setText("Do you want to restart the whole setup, or just specific emotions?")
+        whole_btn = msg.addButton("Whole setup", QMessageBox.AcceptRole)
+        partial_btn = msg.addButton("Specific emotions", QMessageBox.ActionRole)
+        msg.addButton(QMessageBox.Cancel)
+        msg.exec_()
+        
+        clicked = msg.clickedButton()
+        if clicked == whole_btn:
+            self._restart_setup_requested = True
+            self._restart_mode = "whole"
+        elif clicked == partial_btn:
+            self._restart_setup_requested = True
+            self._restart_mode = "specific"
+        else:
+            self._restart_setup_requested = False
+            self._restart_mode = None
+            return
+        
+        # highlight button to indicate choice made
         self.restart_button.setStyleSheet("""
             QPushButton {
                 background: qlineargradient(
@@ -552,13 +618,16 @@ class SettingsDialog(QDialog):
     
     def is_restart_setup_requested(self):
         return self._restart_setup_requested
+    
+    def get_restart_mode(self):
+        return self._restart_mode or "whole"
 
 
 class MainWindow(QMainWindow):
     """Main window with full UI controls"""
     
     frame_ready = pyqtSignal(object)
-    restart_setup_signal = pyqtSignal()
+    restart_setup_signal = pyqtSignal(str)
     
     def __init__(self, camera_index=0):
         super().__init__()
@@ -581,6 +650,7 @@ class MainWindow(QMainWindow):
         self.detection_thread = None
         self.stop_event = None
         self.emotion_detection_active = False
+        self.available_cameras = self._scan_cameras()
         
         # Initialize pygame
         if not pygame.mixer.get_init():
@@ -590,7 +660,8 @@ class MainWindow(QMainWindow):
         self.frame_ready.connect(self._update_camera_display)
         
         self._setup_ui()
-    
+        self._load_trigger_time_settings()
+
     def _get_main_stylesheet(self):
         return """
             QMainWindow {
@@ -677,6 +748,16 @@ class MainWindow(QMainWindow):
                 background: none;
             }
         """
+
+    def _scan_cameras(self, max_index: int = 4) -> List[int]:
+        """Probe camera indices once at startup."""
+        found = []
+        for idx in range(max_index + 1):
+            cap = cv2.VideoCapture(idx)
+            if cap.isOpened():
+                found.append(idx)
+            cap.release()
+        return found
     
     def _setup_ui(self):
         central_widget = QWidget()
@@ -787,7 +868,7 @@ class MainWindow(QMainWindow):
         emotions_label.setStyleSheet("font-size: 14px; font-weight: bold;")
         emotions_header.addWidget(emotions_label)
         emotions_header.addStretch()
-        emotions_header.addSpacing(50)
+        emotions_header.addSpacing(100)
     
         emotion_trigger_time_label = QLabel("Trigger Time")
         emotion_trigger_time_label.setStyleSheet("font-size: 11px;")
@@ -813,10 +894,19 @@ class MainWindow(QMainWindow):
     
         self.emotion_trigger_slider = QSlider(Qt.Horizontal)
         self.emotion_trigger_slider.setMinimum(0)
-        self.emotion_trigger_slider.setMaximum(100)
-        self.emotion_trigger_slider.setValue(50)
+        self.emotion_trigger_slider.setMaximum(len(EMOTION_TRIGGER_OPTIONS) - 1)
+        self.emotion_trigger_slider.setTickInterval(1)
+        self.emotion_trigger_slider.setTickPosition(QSlider.TicksBelow)
         self.emotion_trigger_slider.setFixedWidth(120)
+        self.emotion_trigger_slider.valueChanged.connect(self._on_emotion_trigger_changed)
         emotions_header.addWidget(self.emotion_trigger_slider)
+        self.emotion_trigger_value_label = QLabel("0")
+        self.emotion_trigger_value_label.setStyleSheet("font-size: 11px; color: #cccccc;")
+        emotions_header.addWidget(self.emotion_trigger_value_label)
+        emotion_save_btn = QPushButton("Save")
+        emotion_save_btn.setFixedWidth(60)
+        emotion_save_btn.clicked.connect(self._save_emotion_trigger_time)
+        emotions_header.addWidget(emotion_save_btn)
     
         emotions_header.addSpacing(20)
     
@@ -881,12 +971,12 @@ class MainWindow(QMainWindow):
         gestures_header.addStretch()
         gestures_header.addSpacing(50)
     
-        gesture_sensitivity_label = QLabel("Sensitivity")
-        gesture_sensitivity_label.setStyleSheet("font-size: 11px;")
-        gestures_header.addWidget(gesture_sensitivity_label)
+        gesture_trigger_label = QLabel("Trigger Time")
+        gesture_trigger_label.setStyleSheet("font-size: 11px;")
+        gestures_header.addWidget(gesture_trigger_label)
     
-        gesture_sensitivity_info = QLabel("ℹ")
-        gesture_sensitivity_info.setStyleSheet("""
+        gesture_trigger_info = QLabel("ℹ")
+        gesture_trigger_info.setStyleSheet("""
             QLabel {
                 color: #888888;
                 font-size: 14px;
@@ -897,18 +987,27 @@ class MainWindow(QMainWindow):
                 color: #FFFFFF;
             }
         """)
-        gesture_sensitivity_info.setToolTip("How confident should the bot be to play a sound")
-        gesture_sensitivity_info.setCursor(Qt.WhatsThisCursor)
-        gestures_header.addWidget(gesture_sensitivity_info)
+        gesture_trigger_info.setToolTip("How long should a gesture persist before playing a sound")
+        gesture_trigger_info.setCursor(Qt.WhatsThisCursor)
+        gestures_header.addWidget(gesture_trigger_info)
     
         gestures_header.addSpacing(5)
     
-        self.gesture_sensitivity_slider = QSlider(Qt.Horizontal)
-        self.gesture_sensitivity_slider.setMinimum(0)
-        self.gesture_sensitivity_slider.setMaximum(100)
-        self.gesture_sensitivity_slider.setValue(50)
-        self.gesture_sensitivity_slider.setFixedWidth(120)
-        gestures_header.addWidget(self.gesture_sensitivity_slider)
+        self.gesture_trigger_slider = QSlider(Qt.Horizontal)
+        self.gesture_trigger_slider.setMinimum(0)
+        self.gesture_trigger_slider.setMaximum(len(GESTURE_TRIGGER_OPTIONS) - 1)
+        self.gesture_trigger_slider.setTickInterval(1)
+        self.gesture_trigger_slider.setTickPosition(QSlider.TicksBelow)
+        self.gesture_trigger_slider.setFixedWidth(120)
+        self.gesture_trigger_slider.valueChanged.connect(self._on_gesture_trigger_changed)
+        gestures_header.addWidget(self.gesture_trigger_slider)
+        self.gesture_trigger_value_label = QLabel("0")
+        self.gesture_trigger_value_label.setStyleSheet("font-size: 11px; color: #cccccc;")
+        gestures_header.addWidget(self.gesture_trigger_value_label)
+        gesture_save_btn = QPushButton("Save")
+        gesture_save_btn.setFixedWidth(60)
+        gesture_save_btn.clicked.connect(self._save_gesture_trigger_time)
+        gestures_header.addWidget(gesture_save_btn)
     
         gestures_layout.addLayout(gestures_header)
         gestures_layout.addSpacing(5)
@@ -930,6 +1029,53 @@ class MainWindow(QMainWindow):
                 gestures_layout.addSpacing(4)
     
         return gestures_layout
+
+    def _emotion_trigger_index_from_value(self, value: float) -> int:
+        return min(range(len(EMOTION_TRIGGER_OPTIONS)), key=lambda i: abs(EMOTION_TRIGGER_OPTIONS[i] - value))
+
+    def _gesture_trigger_index_from_value(self, value: float) -> int:
+        return min(range(len(GESTURE_TRIGGER_OPTIONS)), key=lambda i: abs(GESTURE_TRIGGER_OPTIONS[i] - value))
+
+    def _format_trigger_value(self, value: float) -> str:
+        text = f"{value:.2f}"
+        return text.rstrip("0").rstrip(".")
+
+    def _load_trigger_time_settings(self) -> None:
+        config = load_json(SETUP_CONFIG_PATH)
+        trigger_cfg = config.get("trigger_times", {}) if isinstance(config, dict) else {}
+        emo_value = float(trigger_cfg.get("emotion", TRIGGER_TIME_EMOTION_SEC))
+        gest_value = float(trigger_cfg.get("gesture", TRIGGER_TIME_GESTURE_SEC))
+        self.emotion_trigger_slider.setValue(self._emotion_trigger_index_from_value(emo_value))
+        self.gesture_trigger_slider.setValue(self._gesture_trigger_index_from_value(gest_value))
+        self.emotion_trigger_value_label.setText(self._format_trigger_value(emo_value))
+        self.gesture_trigger_value_label.setText(self._format_trigger_value(gest_value))
+
+    def _refresh_detection_after_settings_change(self) -> None:
+        if self.emotion_detection_active:
+            self.stop_detection_internal()
+            time.sleep(0.3)
+            self.start_detection_thread()
+            self.emotion_detection_button.setChecked(True)
+            self.emotion_detection_active = True
+            self.emotion_detection_button.setText("Detection: ON")
+
+    def _save_emotion_trigger_time(self):
+        value = EMOTION_TRIGGER_OPTIONS[self.emotion_trigger_slider.value()]
+        update_json(str(SETUP_CONFIG_PATH), "trigger_times", {"emotion": value})
+        self._refresh_detection_after_settings_change()
+
+    def _save_gesture_trigger_time(self):
+        value = GESTURE_TRIGGER_OPTIONS[self.gesture_trigger_slider.value()]
+        update_json(str(SETUP_CONFIG_PATH), "trigger_times", {"gesture": value})
+        self._refresh_detection_after_settings_change()
+
+    def _on_emotion_trigger_changed(self, idx: int):
+        value = EMOTION_TRIGGER_OPTIONS[idx]
+        self.emotion_trigger_value_label.setText(self._format_trigger_value(value))
+
+    def _on_gesture_trigger_changed(self, idx: int):
+        value = GESTURE_TRIGGER_OPTIONS[idx]
+        self.gesture_trigger_value_label.setText(self._format_trigger_value(value))
     
     # camera detection
     def start_detection_thread(self):
@@ -955,7 +1101,7 @@ class MainWindow(QMainWindow):
                 start_detection(
                     camera_index=self.camera_index,
                     show_window=False,
-                    virtual_cam=False,
+                    virtual_cam=True,
                     frame_callback=frame_callback,
                     stop_event=self.stop_event,
                     show_fps_plot=False,
@@ -1034,7 +1180,7 @@ class MainWindow(QMainWindow):
             self.stop_detection_internal()
     
     def open_settings(self):
-        dialog = SettingsDialog(self.camera_index, self)
+        dialog = SettingsDialog(self.camera_index, cameras=self.available_cameras, parent=self)
         
         if dialog.exec_() == QDialog.Accepted:
             new_camera_index = dialog.get_camera_index()
@@ -1071,7 +1217,7 @@ class MainWindow(QMainWindow):
                     self.stop_detection_internal()
                     time.sleep(1.0)
                 
-                self.restart_setup_signal.emit()
+                self.restart_setup_signal.emit(dialog.get_restart_mode())
     
     def closeEvent(self, event):
         if self._is_closing:

@@ -88,6 +88,7 @@ class RestFaceCalibrator:
         analyze_every: int = 5,
         selector_emotions: Optional[Sequence[str]] = None,
         enabled_emotions: Optional[Sequence[str]] = None,
+        completed_emotions: Optional[Sequence[str]] = None,
     ):
         """
         Führt den Nutzer durch verschiedene Emotionen und sammelt Embeddings.
@@ -122,9 +123,16 @@ class RestFaceCalibrator:
         if selection_mode:
             self.profiles = {}
 
+        completed_list = list(completed_emotions) if completed_emotions is not None else []
         instruction_map = {emotion: instruction for emotion, instruction in targets}
         pending_order = [emotion for emotion, _ in targets]
         pending_map = dict(instruction_map)  # emotions still required at least once
+        # Drop already completed emotions from the pending set (used during partial reruns)
+        if completed_list:
+            for emo in list(pending_map.keys()):
+                if emo in completed_list:
+                    pending_map.pop(emo, None)
+            pending_order = [emo for emo in pending_order if emo not in completed_list]
 
         selector_list = (
             list(selector_emotions) if selector_emotions is not None else list(instruction_map)
@@ -145,7 +153,10 @@ class RestFaceCalibrator:
 
         if use_selector and selector_list:
             qt_app, selector_ui = self._init_emotion_selector(
-                selector_list, position=SELECTOR_WINDOW_POSITION, enabled_emotions=enabled_list
+                selector_list,
+                position=SELECTOR_WINDOW_POSITION,
+                enabled_emotions=enabled_list,
+                completed_emotions=completed_list,
             )
             if selector_ui is not None and qt_app is not None:
                 event_pump = lambda: qt_app.processEvents()
@@ -160,6 +171,21 @@ class RestFaceCalibrator:
 
         try:
             while pending_map or (selector_ui is not None and qt_app is not None):
+                if selector_ui is not None:
+                    reset_target = selector_ui.consume_reset_request()
+                    if reset_target:
+                        # Drop previously captured data for this emotion and re-queue it
+                        self.profiles.pop(reset_target, None)
+                        pending_map[reset_target] = instruction_map[reset_target]
+                        if reset_target not in pending_order:
+                            pending_order.insert(0, reset_target)
+                        emotion = reset_target
+                        if selector_ui is not None:
+                            selector_ui.set_active_emotion(reset_target)
+                        # Keep looping to allow user to start recording again
+                        if qt_app is not None:
+                            qt_app.processEvents()
+                        continue
                 # NEW: Check for camera switch between emotions
                 if camera_index_checker:
                     new_index = camera_index_checker()
@@ -247,13 +273,6 @@ class RestFaceCalibrator:
                             selector_ui.mark_completed(emotion)
                             if done_checker and done_checker():
                                 done_triggered = True
-                            elif selector_ui.remaining_emotions() == 0:
-                                # Auto-finish without requiring the user to press Stop/Done.
-                                try:
-                                    selector_ui._handle_done_clicked()  # type: ignore[attr-defined]
-                                except Exception:
-                                    pass
-                                done_triggered = True
                     break
                 if done_triggered:
                     break
@@ -338,7 +357,6 @@ class RestFaceCalibrator:
 
         vectors = []
         feature_vectors = []
-        sample_crops = []
         frame_count = 0
         start = time.time()
         print(f"\n🎬 Recording emotion '{emotion}' ...")
@@ -416,8 +434,6 @@ class RestFaceCalibrator:
                     emotion_vec = np.array(list(result[0]["emotion"].values()))
                     vectors.append(emotion_vec)
                     feature_vectors.append(features)
-                    if len(sample_crops) < 3:
-                        sample_crops.append(processed)
                     print(f"✅ {emotion}: captured sample {len(vectors)}")
                 except Exception as exc:
                     print("⚠️ Analysis error:", exc)
@@ -432,7 +448,6 @@ class RestFaceCalibrator:
             {
                 "vectors": vectors,
                 "features": feature_vectors,
-                "samples": sample_crops,
             },
             None,
         )
@@ -442,6 +457,7 @@ class RestFaceCalibrator:
         emotions: Sequence[str],
         position: Optional[tuple[int, int]] = None,
         enabled_emotions: Optional[Sequence[str]] = None,
+        completed_emotions: Optional[Sequence[str]] = None,
     ):
         """Initialisiere PyQt-Selector, falls verfügbar."""
         try:
@@ -451,7 +467,10 @@ class RestFaceCalibrator:
             return None, None
         app = ensure_qt_app()
         window = EmotionSelectorWindow(
-            emotions, position=position, enabled_emotions=enabled_emotions
+            emotions,
+            position=position,
+            enabled_emotions=enabled_emotions,
+            completed_emotions=completed_emotions,
         )
         window.show()
         return app, window
@@ -564,7 +583,6 @@ class RestFaceCalibrator:
         model_data = {"profiles": {}}
         for emotion, payload in self.profiles.items():
             vectors_np, mean_vec, distances, stats = self._compute_stats(payload["vectors"])
-            samples = self._save_samples(emotion, payload["samples"])
 
             model_data["profiles"][emotion] = {
                 "vectors": vectors_np.tolist(),
@@ -574,7 +592,6 @@ class RestFaceCalibrator:
                 "distance_std": stats["std"],
                 "distance_min": stats["min"],
                 "distance_max": stats["max"],
-                "sample_images": samples,
             }
         if self.classifier_params:
             model_data["classifier"] = self.classifier_params
@@ -623,18 +640,6 @@ class RestFaceCalibrator:
             "max": float(np.max(distances)),
         }
         return vectors_np, mean_vector, distances, stats
-
-    def _save_samples(self, emotion, crops):
-        if not crops:
-            return []
-        samples_dir = self.model_path.parent / "samples" / emotion
-        samples_dir.mkdir(parents=True, exist_ok=True)
-        saved = []
-        for idx, crop in enumerate(crops):
-            path = samples_dir / f"{emotion}_sample_{idx}.png"
-            cv2.imwrite(str(path), cv2.cvtColor(crop, cv2.COLOR_RGB2BGR))
-            saved.append(str(path.relative_to(self.model_path.parent)))
-        return saved
 
     def _compute_neutral_feature_mean(self):
         """Return mean AU feature vector for neutral, if available."""
@@ -940,7 +945,6 @@ class RestFaceCalibrator:
             self.profiles[emotion] = {
                 "vectors": vectors,
                 "features": features,
-                "samples": [],
             }
         neutral_mean = data.get("neutral_feature_mean")
         if neutral_mean is not None:

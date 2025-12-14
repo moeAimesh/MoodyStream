@@ -55,7 +55,7 @@ class AppController:
             print("\n📋 Setup incomplete → Opening setup wizard.")
             self.open_setup_wizard()
 
-    def open_setup_wizard(self):
+    def open_setup_wizard(self, restart_mode: str = "whole"):
         """Open Setup Wizard and clean up MainWindow if needed."""
         print("🧙 Opening Setup Wizard...")
 
@@ -76,7 +76,7 @@ class AppController:
             self.app.processEvents()  # Process any pending events
 
         # create wizard controller
-        self.wizard_controller = SetupController()
+        self.wizard_controller = SetupController(restart_mode=restart_mode)
         # connect signal when setup is finished
         self.wizard_controller.finished.connect(self._on_setup_finished)
 
@@ -104,7 +104,7 @@ class AppController:
         self.main_window = MainWindow(camera_index=0)
 
         # connect restart setup
-        self.main_window.restart_setup_signal.connect(self.open_setup_wizard)
+        self.main_window.restart_setup_signal.connect(lambda mode: self.open_setup_wizard(mode))
 
         self.main_window.show()
         

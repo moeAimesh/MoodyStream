@@ -1,1 +1,0 @@
-"""Ja/Nein/Prompt-Dialoge (auch als Fallback ohne große GUI)."""

@@ -10,7 +10,7 @@ import joblib
 import numpy as np
 from deepface import DeepFace
 
-from detection.detectors.Filters import EWMAFilter, HiddenMarkovModelFilter
+from detection.detectors.Filters import HiddenMarkovModelFilter
 from detection.emotion_heuristics import (
     EmotionHeuristicScorer,
     HeuristicThresholds,
@@ -19,19 +19,17 @@ from detection.emotion_heuristics import (
 from utils.settings import (
     EMOTION_FILTER,
     EMOTION_SWITCH_FRAMES,
-    EWMA_ALPHA,
-    EWMA_THRESHOLD,
     HMM_STAY_PROB,
     REST_FACE_MODEL_PATH,
     HEURISTIC_DEBUG,
     HEURISTIC_DEBUG_INTERVAL,
 )
 
-CLASSIFIER_CONFIDENCE = 0.35
+CLASSIFIER_CONFIDENCE = 0.40
 DEFAULT_GATE = 0.40
 DEFAULT_MARGIN = 0.01
-STATE_TTL_SECONDS = 600  # purge per-track state after N seconds of inactivity
-STATE_PURGE_INTERVAL = 60  # throttle how often we scan for stale tracks
+STATE_TTL_SECONDS = 600  
+STATE_PURGE_INTERVAL = 60 
 
 
 class EmotionRecognition:
@@ -51,7 +49,8 @@ class EmotionRecognition:
 
         self.last_analysis = defaultdict(float)  # context_id -> timestamp
         self.stable_emotion = {}
-        self.filter_mode = (EMOTION_FILTER or "none").lower()
+        # Only HMM or none; EWMA removed
+        self.filter_mode = "hmm" if (EMOTION_FILTER or "").lower() == "hmm" else "none"
         self.filters = {}
         self.switch_frames = EMOTION_SWITCH_FRAMES
         self.switch_state = {}
@@ -347,13 +346,7 @@ class EmotionRecognition:
         if self.filter_mode == "none":
             return None
         if key not in self.filters:
-            if self.filter_mode == "ewma":
-                self.filters[key] = EWMAFilter(
-                    self.emotion_classes,
-                    alpha=EWMA_ALPHA,
-                    threshold=EWMA_THRESHOLD,
-                )
-            elif self.filter_mode == "hmm":
+            if self.filter_mode == "hmm":
                 self.filters[key] = HiddenMarkovModelFilter(
                     self.emotion_classes,
                     stay_prob=HMM_STAY_PROB,
