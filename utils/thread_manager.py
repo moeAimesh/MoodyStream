@@ -1,1 +1,0 @@
-"""Aufgabe: Start/Stopp von Worker-Threads (Kamera, Player, GUI). Sauberes Beenden."""

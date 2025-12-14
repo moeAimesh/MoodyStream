@@ -1,5 +1,12 @@
 {
   "ok": "sounds/sound_cache/dry-fart.mp3",
   "wave": "sounds/sound_cache/was-geht-aaaaaaaab.mp3",
-  "thumbsup": "sounds/sound_cache/dry-fart.mp3"
+  "thumbsup": "sounds/sound_cache/yes_JGNOYIF.mp3",
+  "happy": "sounds/sound_cache/happy-happy-happy-song.mp3",
+  "fear": "sounds/sound_cache/cry-of-fear-heavy-breath.mp3",
+  "sad": "sounds/sound_cache/tf_nemesis.mp3",
+  "surprise": "sounds/sound_cache/audience-surprised.mp3",
+  "thumbs down": "sounds/sound_cache/engineer_no01_1.mp3",
+  "thumbs up": "sounds/sound_cache/yes_JGNOYIF.mp3",
+  "peace": "sounds/sound_cache/mori-calliope-peace.mp3"
 }

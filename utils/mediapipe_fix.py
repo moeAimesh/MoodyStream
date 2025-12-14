@@ -8,7 +8,6 @@ def apply_fix():
 
 
 
-# --- IGNORE ---
 """
 in alle Dateien, die mediapipe nutzen:
 from utils.mediapipe_fix import apply_fix

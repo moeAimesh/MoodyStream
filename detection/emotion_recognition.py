@@ -10,7 +10,7 @@ import joblib
 import numpy as np
 from deepface import DeepFace
 
-from detection.detectors.Filters import EWMAFilter, HiddenMarkovModelFilter
+from detection.detectors.Filters import HiddenMarkovModelFilter
 from detection.emotion_heuristics import (
     EmotionHeuristicScorer,
     HeuristicThresholds,
@@ -19,19 +19,21 @@ from detection.emotion_heuristics import (
 from utils.settings import (
     EMOTION_FILTER,
     EMOTION_SWITCH_FRAMES,
-    EWMA_ALPHA,
-    EWMA_THRESHOLD,
     HMM_STAY_PROB,
     REST_FACE_MODEL_PATH,
+    SETUP_CONFIG_PATH,
     HEURISTIC_DEBUG,
     HEURISTIC_DEBUG_INTERVAL,
+    HEURISTIC_THRESH_WEIGHTS,
+    HEURISTIC_PROB_DEBUG,
+    CLASSIFIER_CONFIDENCE,
 )
+from utils.json_manager import load_json
 
-CLASSIFIER_CONFIDENCE = 0.5
-DEFAULT_GATE = 0.40
+DEFAULT_GATE = CLASSIFIER_CONFIDENCE
 DEFAULT_MARGIN = 0.02
-STATE_TTL_SECONDS = 600  # purge per-track state after N seconds of inactivity
-STATE_PURGE_INTERVAL = 60  # throttle how often we scan for stale tracks
+STATE_TTL_SECONDS = 600  
+STATE_PURGE_INTERVAL = 60 
 
 
 class EmotionRecognition:
@@ -51,7 +53,8 @@ class EmotionRecognition:
 
         self.last_analysis = defaultdict(float)  # context_id -> timestamp
         self.stable_emotion = {}
-        self.filter_mode = (EMOTION_FILTER or "none").lower()
+        # Only HMM or none; EWMA removed
+        self.filter_mode = "hmm" if (EMOTION_FILTER or "").lower() == "hmm" else "none"
         self.filters = {}
         self.switch_frames = EMOTION_SWITCH_FRAMES
         self.switch_state = {}
@@ -73,13 +76,17 @@ class EmotionRecognition:
         self.neutral_feature_mean = None
         self.confidence_gate = DEFAULT_GATE
         self.confidence_margin = DEFAULT_MARGIN
+        self.config_confidence = None
+        self.config_heuristic_weights = None
         self.state_ttl = STATE_TTL_SECONDS
         self._last_purge = 0.0
+        self.prob_debug = HEURISTIC_PROB_DEBUG
         self.heuristics = EmotionHeuristicScorer(
             debug=HEURISTIC_DEBUG,
             debug_interval=HEURISTIC_DEBUG_INTERVAL,
             neutral_baseline=None,
         )
+        self._load_overrides()
         self._load_profiles()
 
     def analyze_frame(self, frame, features=None, track_id: Optional[int] = None) -> Optional[str]:
@@ -128,6 +135,8 @@ class EmotionRecognition:
 
             emotion = None
             classifier_probs = None
+            raw_probs = None
+            heuristics_rejected = False
             confidence = None
             if self.classifier_model is not None and combined_vector is not None:
                 _, _, classifier_probs = self._predict_classifier_model(combined_vector)
@@ -135,23 +144,79 @@ class EmotionRecognition:
                 _, _, classifier_probs = self._predict_classifier_linear(combined_vector)
 
             if classifier_probs is not None:
+                raw_probs = classifier_probs.copy()
                 top2 = np.partition(classifier_probs, -2)[-2:]
                 idx = int(np.argmax(classifier_probs))
+                label_name = self.emotion_classes[idx]
                 confidence = float(classifier_probs[idx])
                 margin = confidence - float(top2[0] if classifier_probs.size > 1 else 0.0)
-                required_gate = max(CLASSIFIER_CONFIDENCE, self.confidence_gate)
+                required_gate = self.confidence_gate
                 required_margin = self.confidence_margin
                 candidate = None
                 # Einheitliche Confidence-Policy: Gate + Margin für alle Klassen
                 if confidence >= required_gate and margin >= required_margin:
-                    candidate = self.emotion_classes[idx]
+                    candidate = label_name
                 else:
                     classifier_probs = None
                 if candidate and feature_vec_raw is not None:
                     if not self.heuristics.validate(candidate, feature_vec_raw):
                         candidate = None
                         classifier_probs = None
+                        heuristics_rejected = True
+                        if self.prob_debug:
+                            vec_dbg = np.asarray(feature_vec_raw, dtype=float).flatten()
+                            rules = self.heuristics.rules
+                            try:
+                                mouth = rules._get_block(vec_dbg, "mouth_corner")
+                                cheek = rules._get_block(vec_dbg, "cheek_raise")
+                                if label_name:
+                                    if label_name == "happy":
+                                        mouth_curve = mouth[2] if mouth.size >= 3 else None
+                                        cheek_mean = float(np.mean(cheek[:2])) if cheek.size >= 2 else None
+                                        print(
+                                            "[probs] happy details: "
+                                            f"mouth_curve={mouth_curve:.3f} (<= {rules.thresholds.happy_mouth_curve_max:.3f}), "
+                                            f"cheek_mean={cheek_mean:.3f} (>= {rules.thresholds.happy_cheek_mean_min:.3f})"
+                                        )
+                                    elif label_name == "surprise":
+                                        mouth_open = mouth[0] if mouth.size >= 1 else None
+                                        print(
+                                            "[probs] surprise details: "
+                                            f"mouth_open={mouth_open:.3f} (>= {rules.thresholds.surprise_mouth_open_min:.3f})"
+                                        )
+                                    elif label_name == "sad":
+                                        mouth_drop = rules._get_block(vec_dbg, "mouth_depressor")
+                                        mouth_geom = rules._get_block(vec_dbg, "mouth_corner")
+                                        left = mouth_drop[0] if mouth_drop.size >= 1 else None
+                                        right = mouth_drop[1] if mouth_drop.size >= 2 else None
+                                        avg = mouth_drop[2] if mouth_drop.size >= 3 else None
+                                        open_mouth = mouth_geom[0] if mouth_geom.size >= 1 else None
+                                        print(
+                                            "[probs] sad details: "
+                                            f"dropL={left:.3f}, dropR={right:.3f}, avg={avg:.3f} "
+                                            f"(mins {rules.thresholds.sad_drop_min:.3f}/{rules.thresholds.sad_avg_min:.3f}); "
+                                            f"mouth_open={open_mouth:.3f} (<= {rules.thresholds.sad_mouth_open_max:.3f})"
+                                        )
+                                    elif label_name == "fear":
+                                        lid = rules._get_block(vec_dbg, "lid_aperture")
+                                        lid_mean = float(np.mean(lid[:2])) if lid.size >= 2 else None
+                                        print(
+                                            "[probs] fear details: "
+                                            f"lid_mean={lid_mean:.3f} (>= {rules.thresholds.fear_lid_open_min:.3f})"
+                                        )
+                                self._log_thresholds(label_name)
+                            except Exception:
+                                pass
                 emotion = candidate
+
+            if self.prob_debug and raw_probs is not None:
+                self._log_probs("model", raw_probs)
+                if heuristics_rejected:
+                    print(
+                        f"[probs] heuristics rejected label '{self.emotion_classes[int(np.argmax(raw_probs))]}'"
+                    )
+                if classifier_probs is not None:
+                    self._log_probs("post_heuristic", classifier_probs)
 
             if emotion is None:
                 emotion = "neutral"
@@ -167,6 +232,21 @@ class EmotionRecognition:
         except Exception as exc:  # pragma: no cover
             print(f"⚠️ Fehler bei Emotionserkennung: {exc}")
             return self.stable_emotion.get(key)
+
+    def _apply_threshold_multiplier(
+        self, thresholds: HeuristicThresholds | None
+    ) -> HeuristicThresholds | None:
+        """Scale personalized heuristic thresholds by configured per-threshold factors."""
+        if thresholds is None:
+            return None
+        per_threshold = (
+            self.config_heuristic_weights
+            if isinstance(self.config_heuristic_weights, dict)
+            else HEURISTIC_THRESH_WEIGHTS if isinstance(HEURISTIC_THRESH_WEIGHTS, dict) else None
+        )
+        if per_threshold:
+            return thresholds.scaled_by_emotion({}, per_threshold=per_threshold, default_factor=1.0)
+        return thresholds
 
     def _load_profiles(self):
         if not self.model_path.exists():
@@ -224,6 +304,8 @@ class EmotionRecognition:
                 if isinstance(payload, dict) and payload.get("feature_vectors")
             }
             heuristic_thresholds = compute_thresholds_from_samples(feature_vectors)
+
+        heuristic_thresholds = self._apply_threshold_multiplier(heuristic_thresholds)
 
         classifier = data.get("classifier")
         if not classifier:
@@ -335,6 +417,34 @@ class EmotionRecognition:
                 f"(μ={mean:.2f}, σ={std:.2f})"
             )
 
+    def _log_probs(self, stage: str, probs: np.ndarray):
+        """Pretty-print probability vector for debugging."""
+        if probs.shape[0] != len(self.emotion_classes):
+            return
+        formatted = ", ".join(
+            f"{label}:{float(probs[self._label_index(label)]):.2f}" for label in self.emotion_classes
+        )
+        print(f"[probs] {stage}: {formatted}")
+
+    def _log_thresholds(self, label: str):
+        """Log the active heuristic thresholds for a label."""
+        t = self.heuristics.thresholds
+        if label == "happy":
+            print(
+                "[thresh] happy: "
+                f"mouth_curve_max={t.happy_mouth_curve_max:.3f}, "
+                f"cheek_mean_min={t.happy_cheek_mean_min:.3f}"
+            )
+        elif label == "surprise":
+            print(f"[thresh] surprise: mouth_open_min={t.surprise_mouth_open_min:.3f}")
+        elif label == "sad":
+            print(
+                "[thresh] sad: "
+                f"drop_min={t.sad_drop_min:.3f}, avg_min={t.sad_avg_min:.3f}, mouth_open_max={t.sad_mouth_open_max:.3f}"
+            )
+        elif label == "fear":
+            print(f"[thresh] fear: lid_open_min={t.fear_lid_open_min:.3f}")
+
     def _label_index(self, label: str) -> int:
         return self.class_index.get(label, self.class_index["neutral"])
 
@@ -347,13 +457,7 @@ class EmotionRecognition:
         if self.filter_mode == "none":
             return None
         if key not in self.filters:
-            if self.filter_mode == "ewma":
-                self.filters[key] = EWMAFilter(
-                    self.emotion_classes,
-                    alpha=EWMA_ALPHA,
-                    threshold=EWMA_THRESHOLD,
-                )
-            elif self.filter_mode == "hmm":
+            if self.filter_mode == "hmm":
                 self.filters[key] = HiddenMarkovModelFilter(
                     self.emotion_classes,
                     stay_prob=HMM_STAY_PROB,
@@ -425,3 +529,18 @@ class EmotionRecognition:
         self.stable_emotion.pop(key, None)
         self.switch_state.pop(key, None)
         self.filters.pop(key, None)
+
+    def _load_overrides(self):
+        """Load runtime overrides from setup_config.json."""
+        cfg = load_json(SETUP_CONFIG_PATH)
+        if not isinstance(cfg, dict):
+            cfg = {}
+        try:
+            val = float(cfg.get("classifier_confidence", CLASSIFIER_CONFIDENCE))
+            self.config_confidence = val
+            self.confidence_gate = val
+        except Exception:
+            self.config_confidence = None
+        weights = cfg.get("heuristic_thresh_weights")
+        if isinstance(weights, dict):
+            self.config_heuristic_weights = weights

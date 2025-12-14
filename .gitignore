@@ -11,3 +11,5 @@ scripts/Screenshot 2025-11-17 201550.png
 # Ignore generated rest-face models
 setup/rest_face_model.json
 setup/rest_face_model.profiles.snapshot.json
+detection/detectors/gestures/gesture_dataset.npz
+.vscode

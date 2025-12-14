@@ -1,4 +1,4 @@
-"""Webcam loop with configurable single or multi-face tracking."""
+"""Webcam loop with simple face detection + ID matching."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import time
 from collections import defaultdict, deque
 import math
 from itertools import count
-from typing import Dict, Optional
+from typing import Dict, Optional, Callable
 
 import cv2
 import matplotlib.pyplot as plt
@@ -19,8 +19,6 @@ from detection.face_detection import detect_faces
 from detection.preprocessing import preprocess_face
 from detection.facemesh_features import extract_facemesh_features
 from detection.gesture_recognition import detect_gestures
-from detection.kalman_tracker import Tracker as KalmanTracker
-from detection.single_face_tracker import SingleFaceTracker
 from detection.tracking_types import TrackInfo, random_color
 from detection.virtual_cam import (
     VirtualCamError,
@@ -31,14 +29,13 @@ from detection.virtual_cam import (
 from detection.gesture_mapper import get_sound_for_gestures
 from detection.emotion_mapper import get_sound_for_emotions
 from sounds.play_sound import play
+from utils.json_manager import load_json
 from utils.mediapipe_fix import apply_fix
 from utils.settings import (
-    FACE_DETECT_INTERVAL_MULTI,
-    FACE_DETECT_INTERVAL_SINGLE,
-    MAX_MISSING_FRAMES,
-    TRACKING_MODE,
+    SETUP_CONFIG_PATH,
+    TRIGGER_TIME_EMOTION_SEC,
+    TRIGGER_TIME_GESTURE_SEC,
 )
-
 apply_fix()
 
 FPS_BEFORE_GESTURE: list[float] = []
@@ -47,6 +44,8 @@ FPS_AFTER: list[float] = []
 EMOTION_LAG_MS: deque[float] = deque(maxlen=500)
 
 EMOTION_ENQUEUE_INTERVAL = 0.35
+# Run a face detection every N frames to refresh bounding boxes/IDs
+FACE_DETECT_INTERVAL_FRAMES = 5
 
 
 def visualise_avg_fps():
@@ -82,21 +81,29 @@ def start_detection(
     *,
     show_window: bool = True,
     window_name: str = "MOODY Detection",
-    virtual_cam: bool = False,
+    virtual_cam: bool = True,
     virtual_cam_preview: bool = False,
     virtual_cam_width: Optional[int] = None,
     virtual_cam_height: Optional[int] = None,
     virtual_cam_fps: Optional[int] = None,
+    frame_callback: Optional[Callable[[np.ndarray], None]] = None,
+    stop_event: Optional[threading.Event] = None,
+    show_fps_plot: bool = False,  # only activate when necessary otherwise gui will crash
 ):
     cap = cv2.VideoCapture(camera_index)
     if not cap.isOpened():
-        raise RuntimeError(f"Kamera-Index {camera_index} konnte nicht geöffnet werden.")
-    thumb_start_time = None
-    sound_played = False
-    
+        raise RuntimeError(f"Kamera-Index {camera_index} konnte nicht geÃ¶ffnet werden.")
+    gesture_start_time = None
+    gesture_sound_played = False
+    config = load_json(SETUP_CONFIG_PATH)
+    trigger_cfg = config.get("trigger_times", {}) if isinstance(config, dict) else {}
+    gesture_trigger_secs = float(trigger_cfg.get("gesture", TRIGGER_TIME_GESTURE_SEC))
+    emotion_trigger_secs = float(trigger_cfg.get("emotion", TRIGGER_TIME_EMOTION_SEC))
+    gesture_trigger_secs = max(0.0, gesture_trigger_secs)
+    emotion_trigger_secs = max(0.0, emotion_trigger_secs)
 
     er = EmotionRecognition(threshold=10)
-    print("🎥 Kamera gestartet – Gesten- und Emotionserkennung aktiv!")
+    print("Kamera gestartet Gesten- und Emotionserkennung aktiv!")
 
     emotion_jobs: "queue.Queue[tuple]" = queue.Queue(maxsize=8)
     emotion_results: "queue.Queue[tuple]" = queue.Queue()
@@ -120,19 +127,15 @@ def start_detection(
     worker_thread = threading.Thread(target=emotion_worker, daemon=True)
     worker_thread.start()
 
-    tracking_mode = (TRACKING_MODE or "single").lower()
     label_overlays = True
-    single_tracker = SingleFaceTracker()
-    multi_tracker = KalmanTracker(max_missing_frames=MAX_MISSING_FRAMES)
-    multi_tracker.start()
-    multi_cache: Dict[int, TrackInfo] = {}
     raw_track_ids = count()
     raw_track_cache: Dict[int, TrackInfo] = {}
-    raw_detection_state = {"last_frame": -FACE_DETECT_INTERVAL_SINGLE}
+    raw_detection_state = {"last_frame": -FACE_DETECT_INTERVAL_FRAMES}
     default_emotion = "neutral"
     
     #merkt sich zuletzt gespielte Emotion pro Track (damit wir nicht spammen)
     last_emotions: Dict[int, Optional[str]] = defaultdict(lambda: None)
+    emotion_stable: Dict[int, tuple[Optional[str], float]] = {}
 
     frame_idx = 0
     virtual_cam_publisher: Optional[VirtualCamPublisher] = None
@@ -140,10 +143,16 @@ def start_detection(
 
     try:
         while True:
+            # check for stop event
+            if stop_event and stop_event.is_set():
+                print("🛑 Stop event detected at loop start - breaking")
+                break
+            
             loop_start = time.perf_counter()
             ret, frame_full = cap.read()
             if not ret:
                 break
+            raw_frame = frame_full.copy()
             now = time.time()
             frame_idx += 1
 
@@ -156,23 +165,21 @@ def start_detection(
                     print(f"[virtual-cam] deaktiviert: {exc}")
                     virtual_cam = False
 
-            if tracking_mode == "multi":
-                tracks = update_multi_face_tracks(
-                    frame_full, frame_idx, now, multi_tracker, multi_cache, er
-                )
-            elif tracking_mode == "single":
-                tracks = single_tracker.update(frame_full, frame_idx, now)
-            else:
-                tracks = update_raw_detections(
-                    frame_full,
-                    frame_idx,
-                    now,
-                    raw_track_ids,
-                    raw_track_cache,
-                    raw_detection_state,
-                    FACE_DETECT_INTERVAL_SINGLE,
-                    default_emotion,
-                )
+            tracks = update_raw_detections(
+                frame_full,
+                frame_idx,
+                now,
+                raw_track_ids,
+                raw_track_cache,
+                raw_detection_state,
+                FACE_DETECT_INTERVAL_FRAMES,
+                default_emotion,
+            )
+            
+            # check for stop event
+            if stop_event and stop_event.is_set():
+                print("🛑 Stop event detected after face detection - breaking")
+                break
 
             elapsed_before_gesture = (time.perf_counter() - loop_start) * 1000
             fps_before_gesture = 1000 / elapsed_before_gesture if elapsed_before_gesture else 0
@@ -192,17 +199,22 @@ def start_detection(
             gestures = detect_gestures(frame_full)
             current_time = time.time()
             if gestures:
-                if thumb_start_time is None:
-                    thumb_start_time = current_time
-                    sound_played = False
-                elif (current_time - thumb_start_time) >= 1 and not sound_played:
+                if gesture_start_time is None:
+                    gesture_start_time = current_time
+                    gesture_sound_played = False
+                elif (current_time - gesture_start_time) >= gesture_trigger_secs and not gesture_sound_played:
                     g_key, g_path = get_sound_for_gestures(gestures)
                     if g_path:
-                         play(g_path)
-                    sound_played = True
+                        play(g_path)
+                    gesture_sound_played = True
             else:
-                thumb_start_time = None
-                sound_played = False
+                gesture_start_time = None
+                gesture_sound_played = False
+            
+            # check for stop event
+            if stop_event and stop_event.is_set():
+                print("🛑 Stop event detected after gesture detection - breaking")
+                break
 
             elapsed_before = (time.perf_counter() - loop_start) * 1000
             fps_before = 1000 / elapsed_before if elapsed_before else 0
@@ -239,27 +251,46 @@ def start_detection(
             try:
                 while True:
                     track_id, emotion_value, lag_ms = emotion_results.get_nowait()
-                    if tracking_mode == "none" and track_id not in tracks and track_id in raw_track_cache:
-                        raw_track_cache[track_id].emotion = emotion_value
                     if track_id in tracks:
                         tracks[track_id].emotion = emotion_value
+                    elif track_id in raw_track_cache:
+                        raw_track_cache[track_id].emotion = emotion_value
                     EMOTION_LAG_MS.append(lag_ms)
             except queue.Empty:
                 pass
 
-            #Emotion-Sounds über Mapper (pro Track, bei Änderung & != neutral)
+            #Emotion-Sounds ?ber Mapper (pro Track, bei ?nderung & != neutral, nach Haltedauer)
             for track in tracks.values():
                 current_emotion = track.emotion or default_emotion
                 last = last_emotions[track.track_id]
-                if current_emotion != last and current_emotion != "neutral":
+                prev_label, start_ts = emotion_stable.get(track.track_id, (current_emotion, now))
+                if current_emotion != prev_label:
+                    start_ts = now
+                    emotion_stable[track.track_id] = (current_emotion, start_ts)
+                else:
+                    emotion_stable[track.track_id] = (prev_label, start_ts)
+
+                stable_enough = (now - start_ts) >= emotion_trigger_secs
+                should_play = current_emotion != "neutral" and current_emotion != last and stable_enough
+
+                if should_play:
                     s_key, s_path = get_sound_for_emotions([current_emotion])
                     if s_path:
                         play(s_path)
                     last_emotions[track.track_id] = current_emotion
-                else:
-                    #einmal setzen, damit spätere Vergleiche stabil sind
-                    if last is None:
-                        last_emotions[track.track_id] = current_emotion
+                elif last is None:
+                    #einmal setzen, damit sp?tere Vergleiche stabil sind
+                    last_emotions[track.track_id] = current_emotion
+            # remove stale entries for disappeared tracks
+            active_ids = {t.track_id for t in tracks.values()}
+            for tid in list(emotion_stable.keys()):
+                if tid not in active_ids:
+                    emotion_stable.pop(tid, None)
+
+            # check for stop event 
+            if stop_event and stop_event.is_set():
+                print("🛑 Stop event detected after emotion sounds - breaking")
+                break
             
             for track in tracks.values():
                 x, y, w, h = track.bbox
@@ -276,17 +307,6 @@ def start_detection(
                         2,
                     )
 
-            if "thumbsup" in gestures:
-                cv2.putText(
-                    frame_full,
-                    "👍 Daumen hoch erkannt!",
-                    (15, 50),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.8,
-                    (0, 255, 0),
-                    2,
-                )
-
             elapsed_after = (time.perf_counter() - loop_start) * 1000
             fps_after = 1000 / elapsed_after if elapsed_after else 0
             FPS_AFTER.append(fps_after)
@@ -300,6 +320,10 @@ def start_detection(
                 2,
             )
 
+            # callback for gui
+            if frame_callback is not None:
+                frame_callback(frame_full)
+
             key = -1
             if show_window:
                 cv2.imshow(window_name, frame_full)
@@ -309,7 +333,11 @@ def start_detection(
                 key = cv2.waitKey(1) & 0xFF
 
             if virtual_cam_publisher:
-                virtual_cam_publisher.send(frame_full)
+                virtual_cam_publisher.send(raw_frame)
+
+            # stop event to stop detection
+            if stop_event and stop_event.is_set():
+                break
 
             if key == 27:
                 break
@@ -324,50 +352,11 @@ def start_detection(
         if virtual_cam_publisher:
             virtual_cam_publisher.close()
         cv2.destroyAllWindows()
-        print("🛑 Erkennung gestoppt.")
-        visualise_avg_fps()
-
-
-def update_multi_face_tracks(
-    frame,
-    frame_idx,
-    now,
-    tracker: KalmanTracker,
-    cache: Dict[int, TrackInfo],
-    er: EmotionRecognition | None = None,
-):
-    detections = []
-    if frame_idx % max(1, FACE_DETECT_INTERVAL_MULTI) == 0:
-        detections = detect_faces(frame)
-
-    det_array = (
-        np.array(detections, dtype=np.float32)
-        if detections
-        else np.empty((0, 4), dtype=np.float32)
-    )
-    classes = np.zeros((len(det_array),), dtype=np.int32)
-    result = tracker.step({"detections": det_array, "classes": classes})
-
-    updated: Dict[int, TrackInfo] = {}
-    previous_ids = set(cache.keys())
-    for tid, bbox in zip(result["trackIds"], result["tracks"]):
-        bbox = tuple(int(v) for v in bbox)
-        info = cache.get(tid)
-        if info is None:
-            info = TrackInfo(track_id=tid, bbox=bbox, color=random_color(), last_seen=now)
-        else:
-            info.bbox = bbox
-            info.last_seen = now
-        updated[tid] = info
-
-    removed_ids = previous_ids - set(updated.keys())
-    if er:
-        for rid in removed_ids:
-            er.drop_track_state(rid)
-
-    cache.clear()
-    cache.update(updated)
-    return updated
+        print("ðŸ›‘ Erkennung gestoppt.")
+        
+        # plot only when necessary otherwise gui will crash!!!!!!
+        if show_fps_plot:
+            visualise_avg_fps()
 
 
 def update_raw_detections(

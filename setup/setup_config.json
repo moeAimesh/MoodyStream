@@ -1,0 +1,26 @@
+{
+  "sounds": {
+    "happy": "sounds/sound_cache/happy-happy-happy-song.mp3",
+    "thumbsup": "sounds/sound_cache/yes_JGNOYIF.mp3",
+    "surprise": "sounds/sound_cache/audience-surprised.mp3",
+    "sad": "sounds/sound_cache/tf_nemesis.mp3",
+    "fear": "sounds/sound_cache/cry-of-fear-heavy-breath.mp3",
+    "thumbs down": "sounds/sound_cache/engineer_no01_1.mp3",
+    "thumbs up": "sounds/sound_cache/yes_JGNOYIF.mp3",
+    "peace": "sounds/sound_cache/mori-calliope-peace.mp3"
+  },
+  "trigger_times": {
+    "emotion": 0.0,
+    "gesture": 1.0
+  },
+  "volume": 0.42,
+  "classifier_confidence": 0.38,
+  "heuristic_thresh_weights": {
+    "surprise_mouth_open_min": 0.041600000000000005,
+    "happy_cheek_mean_min": 2.65,
+    "happy_mouth_curve_max": 0.05,
+    "sad_mouth_open_max": 0.1,
+    "sad_drop_min": 0.1288,
+    "sad_avg_min": 0.11889999999999999
+  }
+}

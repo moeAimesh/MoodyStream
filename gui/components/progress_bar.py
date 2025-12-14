@@ -1,1 +1,0 @@
-"""Fortschritt im Setup."""

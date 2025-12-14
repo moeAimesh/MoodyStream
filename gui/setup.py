@@ -1,7 +1,6 @@
 """
 Styled GUI components for the Moody setup wizard.
 Includes emotion selector window and instruction dialogs with modern dark theme.
-Updated with Pause and Reset functionality.
 """
 
 import sys
@@ -288,7 +287,7 @@ class EmotionSelectorWindow(QMainWindow):
     camera_index_changed = pyqtSignal(int)  # Signal when camera index changes
     
     def __init__(self, emotions: Sequence[str], position: Optional[tuple] = None,
-                 enabled_emotions: Optional[Sequence[str]] = None, parent=None):
+                 enabled_emotions: Optional[Sequence[str]] = None, completed_emotions: Optional[Sequence[str]] = None, parent=None):
         super().__init__(parent)
         
         self.emotions = list(emotions)
@@ -300,8 +299,8 @@ class EmotionSelectorWindow(QMainWindow):
         self._done_requested = False
         self._aborted = False
         self._camera_index = 0  # Current camera index
-        self._paused = False
         self._reset_requested = False
+        self._precompleted = set(completed_emotions) if completed_emotions else set()
         
         self.setWindowTitle("Emotion Profiling - Moody Setup")
         self.setFixedSize(700, 700)
@@ -328,7 +327,8 @@ class EmotionSelectorWindow(QMainWindow):
         self.logo_label = QLabel()
         # Use a fallback if logo doesn't exist
         try:
-            logo_pixmap = QPixmap("/Users/juliamoor/Desktop/MoodyStream/gui/moody_logo.jpg")
+            base_dir = Path(__file__).resolve().parent
+            logo_pixmap = QPixmap(str(base_dir / "ki-con.jpeg"))
             if not logo_pixmap.isNull():
                 scaled_logo = logo_pixmap.scaled(40, 40, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                 self.logo_label.setPixmap(scaled_logo)
@@ -497,12 +497,6 @@ class EmotionSelectorWindow(QMainWindow):
         self.start_button.setEnabled(False)
         self.start_button.clicked.connect(self._on_start_clicked)
         
-        self.pause_button = QPushButton("Pause")
-        self.pause_button.setMinimumHeight(45)
-        self.pause_button.setEnabled(False)
-        self.pause_button.setCheckable(True)
-        self.pause_button.clicked.connect(self._on_pause_clicked)
-        
         self.reset_button = QPushButton("Reset")
         self.reset_button.setMinimumHeight(45)
         self.reset_button.clicked.connect(self._on_reset_clicked)
@@ -513,9 +507,17 @@ class EmotionSelectorWindow(QMainWindow):
         self.done_button.clicked.connect(self._on_done_clicked)
         
         controls.addWidget(self.start_button, 2)
-        controls.addWidget(self.pause_button, 1)
         controls.addWidget(self.reset_button, 1)
         controls.addWidget(self.done_button, 1)
+
+        # pre-mark completed emotions if provided (e.g., partial restart)
+        for emo in self._precompleted:
+            if emo in self.emotion_buttons and emo in self.enabled_emotions:
+                self.completed_emotions.add(emo)
+                self.emotion_buttons[emo].set_completed(True)
+        if len(self.completed_emotions) >= len(self.enabled_emotions):
+            self.done_button.setEnabled(True)
+            self.status_label.setText("All emotions recorded! Click Done to continue.")
         
         layout.addLayout(controls)
         
@@ -531,6 +533,7 @@ class EmotionSelectorWindow(QMainWindow):
         
         self._selection_queue.append(emotion)
         self.start_button.setEnabled(True)
+        self.active_emotion = emotion
         
         # update active state
         for e, btn in self.emotion_buttons.items():
@@ -542,18 +545,7 @@ class EmotionSelectorWindow(QMainWindow):
         """Handle start button click"""
         self._start_requested = True
         self.start_button.setEnabled(False)
-        self.pause_button.setEnabled(True)
         self.status_label.setText("Recording in progress...")
-    
-    def _on_pause_clicked(self):
-        """Handle pause button click"""
-        self._paused = self.pause_button.isChecked()
-        if self._paused:
-            self.pause_button.setText("Resume")
-            self.status_label.setText("Recording paused")
-        else:
-            self.pause_button.setText("Pause")
-            self.status_label.setText("Recording resumed...")
     
     def _on_reset_clicked(self):
         """Handle reset button click - resets only the current emotion"""
@@ -587,10 +579,6 @@ class EmotionSelectorWindow(QMainWindow):
             
             # Enable start button so user can restart recording
             self.start_button.setEnabled(True)
-            self.pause_button.setEnabled(False)
-            self.pause_button.setChecked(False)
-            self.pause_button.setText("Pause")
-            self._paused = False
             
             # Update done button state - should be disabled if not all complete
             if len(self.completed_emotions) >= len(self.enabled_emotions):
@@ -618,10 +606,6 @@ class EmotionSelectorWindow(QMainWindow):
         """Get current camera index"""
         return self._camera_index
     
-    def is_paused(self) -> bool:
-        """Check if recording is paused"""
-        return self._paused
-    
     def consume_reset_request(self) -> Optional[str]:
         """Check and consume reset request flag, returns the emotion that was reset"""
         if self._reset_requested:
@@ -646,12 +630,6 @@ class EmotionSelectorWindow(QMainWindow):
         # Clear active emotion after completion
         if self.active_emotion == emotion:
             self.active_emotion = None
-        
-        # Reset pause state when completing an emotion
-        self.pause_button.setEnabled(False)
-        self.pause_button.setChecked(False)
-        self.pause_button.setText("Pause")
-        self._paused = False
         
         # Reset start button for next emotion
         self.start_button.setEnabled(False)
@@ -737,7 +715,8 @@ class InstructionsDialog(QDialog):
         # Logo
         self.logo_label = QLabel()
         try:
-            logo_pixmap = QPixmap("/Users/juliamoor/Desktop/MoodyStream/gui/moody_logo.jpg")
+            base_dir = Path(__file__).resolve().parent
+            logo_pixmap = QPixmap(str(base_dir / "ki-con.jpeg"))
             if not logo_pixmap.isNull():
                 scaled_logo = logo_pixmap.scaled(40, 40, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                 self.logo_label.setPixmap(scaled_logo)
