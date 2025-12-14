@@ -119,7 +119,7 @@ def run_rest_face_setup(user="default", force_record=None, restart_mode: str = "
 
     def _run_outlier_filter():
         try:
-            from filter_outlier import filter_outliers
+            from detection.filter_outlier import filter_outliers
 
             summary = filter_outliers(
                 calibrator,
