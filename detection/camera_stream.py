@@ -307,17 +307,6 @@ def start_detection(
                         2,
                     )
 
-            if "thumbsup" in gestures:
-                cv2.putText(
-                    frame_full,
-                    "ðŸ‘ Daumen hoch erkannt!",
-                    (15, 50),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.8,
-                    (0, 255, 0),
-                    2,
-                )
-
             elapsed_after = (time.perf_counter() - loop_start) * 1000
             fps_after = 1000 / elapsed_after if elapsed_after else 0
             FPS_AFTER.append(fps_after)
