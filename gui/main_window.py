@@ -12,7 +12,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QDialog, QMenu, QFileDialog, QComboBox,
                              QMessageBox)
 from PyQt5.QtCore import Qt, pyqtSignal, pyqtSlot, QUrl
-from PyQt5.QtGui import QPixmap, QImage, QDesktopServices
+from PyQt5.QtGui import QPixmap, QImage, QDesktopServices, QIcon
 from pathlib import Path
 from sounds.play_sound import play as play_sound, set_default_volume 
 from utils.json_manager import load_json, save_json, update_json
@@ -22,6 +22,8 @@ from utils.settings import (
     SOUND_MAP_PATH,
     TRIGGER_TIME_EMOTION_SEC,
     TRIGGER_TIME_GESTURE_SEC,
+    HEURISTIC_THRESH_WEIGHTS,
+    CLASSIFIER_CONFIDENCE,
 )
 
 SOUND_CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -392,7 +394,7 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Settings")
         self.setModal(True)
-        self.setFixedSize(400, 280)
+        self.setFixedSize(520, 700)
         self._restart_setup_requested = False
         self._restart_mode = None
         self._available_cameras = list(dict.fromkeys(cameras)) if cameras else []
@@ -511,7 +513,37 @@ class SettingsDialog(QDialog):
         
         layout.addLayout(volume_layout)
         self._load_volume_setting()
-        
+
+        # Advanced settings header
+        advanced_label = QLabel("Advanced Settings")
+        advanced_label.setStyleSheet("font-weight: bold; font-size: 13px;")
+        layout.addWidget(advanced_label)
+
+        # Heuristic weight sliders
+        self.heuristic_sliders = {}
+        heuristics_specs = [
+            ("Surprise: min Mouth Opening", "surprise_mouth_open_min", 0.01, 0.8, "Minimum mouth opening required ':O' to allow Surprise. \n Higher = Surprise triggers less often, lower = Surprise triggers more easily"),
+            ("Fear: min Eye Opening", "fear_lid_open_min", 0.01, 0.7, "Minimum eyelid/eye opening required to allow Fear. \n Higher = Fear triggers less often, lower = Fear triggers more easily"),
+            ("Sad: min Mouth Drop", "sad_drop_min", 0.01, 1.0, "Minimum downward drop in the lower face/mouth ':(' required to allow Sad. \n Higher = Sad triggers less often, lower = Sad triggers more easily"),
+            ("Sad: Overall Strength", "sad_avg_min", 0.01, 1.0, "Minimum overall Sad strength required to allow Sad. \n Higher = Sad triggers less often, lower = Sad triggers more easily"),
+            ("Sad: max Mouth Opening", "sad_mouth_open_max", 0.01, 0.8, "Maximum mouth opening allowed for Sad (e.g., talking can open the mouth). \n Higher = more tolerant, lower = stricter"),
+            ("Happy: min Mouth Curve", "happy_mouth_curve_max", 0.01, 0.5, "Maximum mouth curve ':)' allowed for Happy (too much curve can block it). \n Higher = more tolerant, lower = stricter"),
+            ("Happy: min Cheek Lift", "happy_cheek_mean_min", 2.0, 3.0, "Minimum cheek lift required to allow Happy. \n Higher = Happy triggers less often, lower = Happy triggers more easily"),
+        ]
+        for title, key, lo, hi, tip in heuristics_specs:
+            slider, value_label = self._add_slider_row(
+                layout,
+                label_text=title,
+                config_key=f"heuristic.{key}",
+                value_range=(lo, hi),
+                default_value=HEURISTIC_THRESH_WEIGHTS.get(key, lo),
+                tooltip=tip,
+                percent_label=True,
+            )
+            self.heuristic_sliders[key] = (slider, value_label, lo, hi)
+
+        self._load_advanced_settings()
+
         restart_layout = QHBoxLayout()
         self.restart_button = QPushButton("Restart Setup")
         self.restart_button.clicked.connect(self.restart_setup)
@@ -576,6 +608,66 @@ class SettingsDialog(QDialog):
         pygame.mixer.music.set_volume(vol)
         set_default_volume(vol)
         update_json(str(SETUP_CONFIG_PATH), "volume", vol)
+
+    def _load_advanced_settings(self):
+        cfg = load_json(SETUP_CONFIG_PATH)
+        # heuristics
+        weights_cfg = cfg.get("heuristic_thresh_weights", {}) if isinstance(cfg, dict) else {}
+        for key, (slider, label, lo, hi) in self.heuristic_sliders.items():
+            try:
+                val = float(weights_cfg.get(key, HEURISTIC_THRESH_WEIGHTS.get(key, lo)))
+            except Exception:
+                val = HEURISTIC_THRESH_WEIGHTS.get(key, lo)
+            self._set_slider_from_value(slider, label, val, (lo, hi))
+
+    def _set_slider_from_value(self, slider, value_label, val, value_range):
+        lo, hi = value_range
+        val = max(lo, min(hi, val))
+        percent = int(round((val - lo) / (hi - lo) * 100))
+        slider.blockSignals(True)
+        slider.setValue(percent)
+        slider.blockSignals(False)
+        value_label.setText(f"{percent}%")
+
+    def _add_slider_row(self, parent_layout, label_text, config_key, value_range, default_value, tooltip, percent_label=True):
+        row = QHBoxLayout()
+        label = QLabel(label_text)
+        label.setToolTip(tooltip)
+        row.addWidget(label)
+        slider = QSlider(Qt.Horizontal)
+        slider.setMinimum(0)
+        slider.setMaximum(100)
+        slider.setValue(0)
+        slider.setFixedWidth(200)
+        row.addWidget(slider)
+        value_lbl = QLabel("0%") if percent_label else QLabel("")
+        value_lbl.setFixedWidth(50)
+        value_lbl.setStyleSheet("color: #FFFFFF; font-size: 13px;")
+        row.addWidget(value_lbl)
+        info_label = QLabel("ⓘ")
+        info_label.setToolTip(tooltip)
+        info_label.setStyleSheet("color: #000000; font-size: 12px;")
+        row.addWidget(info_label)
+        row.addStretch()
+        parent_layout.addLayout(row)
+
+        def on_change(percent):
+            val = value_range[0] + (value_range[1] - value_range[0]) * (percent / 100.0)
+            value_lbl.setText(f"{percent}%")
+            cfg_key = config_key
+            # nested dict under heuristic_thresh_weights
+            sub_key = cfg_key.split(".", 1)[1]
+            cfg = load_json(SETUP_CONFIG_PATH)
+            if not isinstance(cfg, dict):
+                cfg = {}
+            weights = cfg.get("heuristic_thresh_weights") if isinstance(cfg.get("heuristic_thresh_weights"), dict) else {}
+            weights[sub_key] = val
+            update_json(str(SETUP_CONFIG_PATH), "heuristic_thresh_weights", weights)
+
+        slider.valueChanged.connect(on_change)
+        # init position
+        self._set_slider_from_value(slider, value_lbl, default_value, value_range)
+        return slider, value_lbl
     
     def restart_setup(self):
         msg = QMessageBox(self)
@@ -585,6 +677,7 @@ class SettingsDialog(QDialog):
         partial_btn = msg.addButton("Specific emotions", QMessageBox.ActionRole)
         msg.addButton(QMessageBox.Cancel)
         msg.exec_()
+        
         
         clicked = msg.clickedButton()
         if clicked == whole_btn:
@@ -634,13 +727,19 @@ class MainWindow(QMainWindow):
         
         self.setWindowTitle("Moodystream")
         self.setGeometry(100, 100, 1400, 800)
+        try:
+            icon_path = os.path.join(self.base_dir, "moody_logo.jpg")
+            if os.path.exists(icon_path):
+                self.setWindowIcon(QIcon(icon_path))
+        except Exception:
+            pass
         
         self.setAttribute(Qt.WA_QuitOnClose, True)
         self._is_closing = False
         
         self.base_dir = os.path.dirname(os.path.abspath(__file__))
         self.logo_path = os.path.join(self.base_dir, "moody_logo.jpg")
-        self.ad_mockup_path = os.path.join(self.base_dir, "ad_mockup.jpg")
+        self.ad_mockup_path = os.path.join(self.base_dir, "ki-con.jpeg")
         
         self.setStyleSheet(self._get_main_stylesheet())
         
@@ -661,6 +760,7 @@ class MainWindow(QMainWindow):
         
         self._setup_ui()
         self._load_trigger_time_settings()
+        self._load_sensitivity_setting()
 
     def _get_main_stylesheet(self):
         return """
@@ -886,7 +986,7 @@ class MainWindow(QMainWindow):
                 color: #FFFFFF;
             }
         """)
-        trigger_time_info.setToolTip("How long should the bot wait to play a sound")
+        trigger_time_info.setToolTip("How long should a detected emotion persist before playing a sound")
         trigger_time_info.setCursor(Qt.WhatsThisCursor)
         emotions_header.addWidget(trigger_time_info)
     
@@ -917,16 +1017,16 @@ class MainWindow(QMainWindow):
         sensitivity_info = QLabel("ℹ")
         sensitivity_info.setStyleSheet("""
             QLabel {
-                color: #888888;
+                color: #000000;
                 font-size: 14px;
                 background: transparent;
                 border: none;
             }
             QLabel:hover {
-                color: #FFFFFF;
+                color: #000000;
             }
         """)
-        sensitivity_info.setToolTip("How confident should the bot be to play a sound")
+        sensitivity_info.setToolTip("Controls how confident the system must be before showing an emotion. \n Higher = emotions trigger less often (more strict). \n Lower = emotions trigger more easily (more responsive)")
         sensitivity_info.setCursor(Qt.WhatsThisCursor)
         emotions_header.addWidget(sensitivity_info)
     
@@ -938,6 +1038,16 @@ class MainWindow(QMainWindow):
         self.emotion_sensitivity_slider.setValue(50)
         self.emotion_sensitivity_slider.setFixedWidth(120)
         emotions_header.addWidget(self.emotion_sensitivity_slider)
+        self.emotion_sensitivity_value = QLabel("50%")
+        self.emotion_sensitivity_value.setFixedWidth(50)
+        self.emotion_sensitivity_value.setStyleSheet("font-size: 11px; color: #FFFFFF;")
+        emotions_header.addWidget(self.emotion_sensitivity_value)
+        self.emotion_sensitivity_slider.valueChanged.connect(self._on_sensitivity_changed)
+        self.emotion_sensitivity_pending = None
+        sensitivity_save_btn = QPushButton("Save")
+        sensitivity_save_btn.setFixedWidth(60)
+        sensitivity_save_btn.clicked.connect(self._save_sensitivity)
+        emotions_header.addWidget(sensitivity_save_btn)
     
         emotions_layout.addLayout(emotions_header)
         emotions_layout.addSpacing(5)
@@ -978,13 +1088,13 @@ class MainWindow(QMainWindow):
         gesture_trigger_info = QLabel("ℹ")
         gesture_trigger_info.setStyleSheet("""
             QLabel {
-                color: #888888;
+                color: #000000;
                 font-size: 14px;
                 background: transparent;
                 border: none;
             }
             QLabel:hover {
-                color: #FFFFFF;
+                color: #000000;
             }
         """)
         gesture_trigger_info.setToolTip("How long should a gesture persist before playing a sound")
@@ -1050,6 +1160,21 @@ class MainWindow(QMainWindow):
         self.emotion_trigger_value_label.setText(self._format_trigger_value(emo_value))
         self.gesture_trigger_value_label.setText(self._format_trigger_value(gest_value))
 
+    def _load_sensitivity_setting(self):
+        cfg = load_json(SETUP_CONFIG_PATH)
+        try:
+            val = float(cfg.get("classifier_confidence"))
+        except Exception:
+            val = CLASSIFIER_CONFIDENCE if 'CLASSIFIER_CONFIDENCE' in globals() else 0.5
+        lo, hi = 0.20, 0.80
+        val = max(lo, min(hi, val))
+        percent = int(round((val - lo) / (hi - lo) * 100))
+        self.emotion_sensitivity_slider.blockSignals(True)
+        self.emotion_sensitivity_slider.setValue(percent)
+        self.emotion_sensitivity_slider.blockSignals(False)
+        self.emotion_sensitivity_value.setText(f"{percent}%")
+        self.emotion_sensitivity_pending = None
+
     def _refresh_detection_after_settings_change(self) -> None:
         if self.emotion_detection_active:
             self.stop_detection_internal()
@@ -1067,6 +1192,19 @@ class MainWindow(QMainWindow):
     def _save_gesture_trigger_time(self):
         value = GESTURE_TRIGGER_OPTIONS[self.gesture_trigger_slider.value()]
         update_json(str(SETUP_CONFIG_PATH), "trigger_times", {"gesture": value})
+        self._refresh_detection_after_settings_change()
+
+    def _on_sensitivity_changed(self, percent: int):
+        lo, hi = 0.20, 0.80
+        val = lo + (hi - lo) * (percent / 100.0)
+        self.emotion_sensitivity_value.setText(f"{percent}%")
+        self.emotion_sensitivity_pending = val
+
+    def _save_sensitivity(self):
+        if self.emotion_sensitivity_pending is None:
+            return
+        update_json(str(SETUP_CONFIG_PATH), "classifier_confidence", self.emotion_sensitivity_pending)
+        self.emotion_sensitivity_pending = None
         self._refresh_detection_after_settings_change()
 
     def _on_emotion_trigger_changed(self, idx: int):
@@ -1212,12 +1350,14 @@ class MainWindow(QMainWindow):
                         self.emotion_detection_button.setText("Detection: OFF")
             
             # setup restart
-            if dialog.is_restart_setup_requested():
-                if self.detection_running:
-                    self.stop_detection_internal()
-                    time.sleep(1.0)
+                if dialog.is_restart_setup_requested():
+                    if self.detection_running:
+                        self.stop_detection_internal()
+                        time.sleep(1.0)
                 
                 self.restart_setup_signal.emit(dialog.get_restart_mode())
+            # Always refresh detection to pick up updated config (heuristics, sensitivity, etc.)
+            self._refresh_detection_after_settings_change()
     
     def closeEvent(self, event):
         if self._is_closing:

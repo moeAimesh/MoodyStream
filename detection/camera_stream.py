@@ -152,6 +152,7 @@ def start_detection(
             ret, frame_full = cap.read()
             if not ret:
                 break
+            raw_frame = frame_full.copy()
             now = time.time()
             frame_idx += 1
 
@@ -343,7 +344,7 @@ def start_detection(
                 key = cv2.waitKey(1) & 0xFF
 
             if virtual_cam_publisher:
-                virtual_cam_publisher.send(frame_full)
+                virtual_cam_publisher.send(raw_frame)
 
             # stop event to stop detection
             if stop_event and stop_event.is_set():

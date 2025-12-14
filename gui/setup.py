@@ -327,7 +327,8 @@ class EmotionSelectorWindow(QMainWindow):
         self.logo_label = QLabel()
         # Use a fallback if logo doesn't exist
         try:
-            logo_pixmap = QPixmap("/Users/juliamoor/Desktop/MoodyStream/gui/moody_logo.jpg")
+            base_dir = Path(__file__).resolve().parent
+            logo_pixmap = QPixmap(str(base_dir / "ki-con.jpeg"))
             if not logo_pixmap.isNull():
                 scaled_logo = logo_pixmap.scaled(40, 40, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                 self.logo_label.setPixmap(scaled_logo)
@@ -714,7 +715,8 @@ class InstructionsDialog(QDialog):
         # Logo
         self.logo_label = QLabel()
         try:
-            logo_pixmap = QPixmap("/Users/juliamoor/Desktop/MoodyStream/gui/moody_logo.jpg")
+            base_dir = Path(__file__).resolve().parent
+            logo_pixmap = QPixmap(str(base_dir / "ki-con.jpeg"))
             if not logo_pixmap.isNull():
                 scaled_logo = logo_pixmap.scaled(40, 40, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                 self.logo_label.setPixmap(scaled_logo)

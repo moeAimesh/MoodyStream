@@ -39,6 +39,70 @@ class HeuristicThresholds:
     happy_mouth_curve_max: float = HAPPY_MOUTH_CURVE_MAX
     happy_cheek_mean_min: float = HAPPY_CHEEK_MEAN_MIN
 
+    def scaled(self, factor: float) -> "HeuristicThresholds":
+        """
+        Return a copy scaled by the given factor.
+        Min-thresholds are multiplied; max-thresholds are divided to preserve intuition.
+        """
+        safe = factor if factor != 0 else 1.0
+        return HeuristicThresholds(
+            surprise_mouth_open_min=self.surprise_mouth_open_min * safe,
+            fear_lid_open_min=self.fear_lid_open_min * safe,
+            sad_drop_min=self.sad_drop_min * safe,
+            sad_avg_min=self.sad_avg_min * safe,
+            # For maxima we divide so lower multipliers loosen the cap.
+            sad_mouth_open_max=self.sad_mouth_open_max / safe,
+            happy_mouth_curve_max=self.happy_mouth_curve_max / safe,
+            happy_cheek_mean_min=self.happy_cheek_mean_min * safe,
+        )
+
+    def scaled_by_emotion(
+        self,
+        factors,
+        *,
+        per_threshold: dict | None = None,
+        default_factor: float = 1.0,
+    ) -> "HeuristicThresholds":
+        """
+        Return a copy scaled per emotion. Missing/invalid factors fall back to default_factor.
+        Min-thresholds are multiplied; max-thresholds are divided to preserve intuition.
+        """
+
+        def pick(name: str) -> float:
+            try:
+                return float(factors.get(name, default_factor))
+            except Exception:
+                return default_factor
+
+        def pick_threshold(name: str, emotion: str) -> float:
+            if per_threshold and name in per_threshold:
+                try:
+                    return float(per_threshold[name])
+                except Exception:
+                    pass
+            return pick(emotion)
+
+        def safe(val: float) -> float:
+            return val if val not in {0.0, -0.0} else 1.0
+
+        surprise_f = safe(pick_threshold("surprise_mouth_open_min", "surprise"))
+        fear_f = safe(pick_threshold("fear_lid_open_min", "fear"))
+        sad_f = safe(pick_threshold("sad_drop_min", "sad"))
+        sad_f_avg = safe(pick_threshold("sad_avg_min", "sad"))
+        sad_f_max = safe(pick_threshold("sad_mouth_open_max", "sad"))
+        happy_f_max = safe(pick_threshold("happy_mouth_curve_max", "happy"))
+        happy_f_min = safe(pick_threshold("happy_cheek_mean_min", "happy"))
+
+        return HeuristicThresholds(
+            surprise_mouth_open_min=self.surprise_mouth_open_min * surprise_f,
+            fear_lid_open_min=self.fear_lid_open_min * fear_f,
+            sad_drop_min=self.sad_drop_min * sad_f,
+            sad_avg_min=self.sad_avg_min * sad_f_avg,
+            sad_mouth_open_max=self.sad_mouth_open_max / sad_f_max,
+            happy_mouth_curve_max=self.happy_mouth_curve_max / happy_f_max,
+            happy_cheek_mean_min=self.happy_cheek_mean_min * happy_f_min,
+        )
+
 
 class EmotionRules:
     """Defines specific geometric rules for different emotions."""
