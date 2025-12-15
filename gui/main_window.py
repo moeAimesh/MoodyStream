@@ -7,10 +7,22 @@ import threading
 import json
 import time
 from typing import List
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                             QHBoxLayout, QPushButton, QLabel, QSlider,
-                             QDialog, QMenu, QFileDialog, QComboBox,
-                             QMessageBox)
+from PyQt5.QtWidgets import (
+    QApplication,
+    QMainWindow,
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QPushButton,
+    QLabel,
+    QSlider,
+    QDialog,
+    QMenu,
+    QFileDialog,
+    QComboBox,
+    QMessageBox,
+    QSizePolicy,
+)
 from PyQt5.QtCore import Qt, pyqtSignal, pyqtSlot, QUrl
 from PyQt5.QtGui import QPixmap, QImage, QDesktopServices, QIcon
 from pathlib import Path
@@ -904,10 +916,11 @@ class MainWindow(QMainWindow):
         self.camera_label.setStyleSheet(
             "background-color: #000000; border: 1px solid #212124; border-radius: 8px;"
         )
-        self.camera_label.setFixedSize(520, 260)
+        self.camera_label.setMinimumSize(640, 360)
+        self.camera_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.camera_label.setAlignment(Qt.AlignCenter)
         self.camera_label.setText("Click 'Detection: ON' to start camera")
-        center_layout.addWidget(self.camera_label, 0, Qt.AlignHCenter)
+        center_layout.addWidget(self.camera_label, 1)
         center_layout.addSpacing(10)
         
         emotions_section = self._create_emotions_section()
