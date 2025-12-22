@@ -1,0 +1,91 @@
+name: Build MoodyStream (Win + mac)
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build (PyInstaller)
+        run: |
+          pyinstaller --noconfirm --clean --name MoodyStream --onedir main.py
+
+      - name: Bundle runtime folders
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release/MoodyStream
+          Copy-Item -Recurse -Force dist/MoodyStream/* release/MoodyStream/
+          Copy-Item -Recurse -Force detection release/MoodyStream/detection
+          Copy-Item -Recurse -Force setup release/MoodyStream/setup
+          Copy-Item -Recurse -Force sounds release/MoodyStream/sounds
+          Copy-Item -Recurse -Force gui release/MoodyStream/gui
+          Copy-Item -Recurse -Force utils release/MoodyStream/utils
+          if (Test-Path README.md) { Copy-Item README.md release/MoodyStream/README.md }
+
+      - name: Zip
+        shell: pwsh
+        run: |
+          Compress-Archive -Path release/MoodyStream/* -DestinationPath MoodyStream-win.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MoodyStream-win
+          path: MoodyStream-win.zip
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install deps
+        run: |
+          python3 -m pip install --upgrade pip
+          pip3 install -r requirements.txt
+          pip3 install pyinstaller
+
+      - name: Build (PyInstaller)
+        run: |
+          pyinstaller --noconfirm --clean --name MoodyStream --onedir main.py
+
+      - name: Bundle runtime folders
+        run: |
+          mkdir -p release/MoodyStream
+          cp -R dist/MoodyStream/* release/MoodyStream/
+          cp -R detection release/MoodyStream/detection
+          cp -R setup release/MoodyStream/setup
+          cp -R sounds release/MoodyStream/sounds
+          cp -R gui release/MoodyStream/gui
+          cp -R utils release/MoodyStream/utils
+          [ -f README.md ] && cp README.md release/MoodyStream/README.md || true
+
+      - name: Zip
+        run: |
+          cd release/MoodyStream
+          zip -r ../../MoodyStream-mac.zip .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MoodyStream-mac
+          path: MoodyStream-mac.zip
