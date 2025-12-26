@@ -6,9 +6,10 @@ DefaultGroupName=MoodyStream
 OutputBaseFilename=MoodyStreamSetup
 Compression=lzma2
 SolidCompression=yes
+OutputDir=Output
 
 [Files]
-Source: "dist\MoodyStream\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
+Source: ""..\dist\MoodyStream\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
 
 [Icons]
 Name: "{group}\MoodyStream"; Filename: "{app}\MoodyStream.exe"
