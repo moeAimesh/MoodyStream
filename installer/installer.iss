@@ -3,13 +3,13 @@ AppName=MoodyStream
 AppVersion=1.0.0
 DefaultDirName={pf}\MoodyStream
 DefaultGroupName=MoodyStream
+OutputDir=Output
 OutputBaseFilename=MoodyStreamSetup
 Compression=lzma2
 SolidCompression=yes
-OutputDir=Output
 
 [Files]
-Source: ""..\dist\MoodyStream\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
+Source: "{#SourcePath}\..\dist\MoodyStream\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
 
 [Icons]
 Name: "{group}\MoodyStream"; Filename: "{app}\MoodyStream.exe"
